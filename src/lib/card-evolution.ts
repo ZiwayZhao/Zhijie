@@ -265,11 +265,11 @@ export function applyEvolution(deck: FlashcardDeck, action: EvolutionAction): Fl
 /*  Persistence                                                        */
 /* ------------------------------------------------------------------ */
 
-const LOG_PREFIX = 'zhijie_evolution_logs_'
+import { STORAGE_KEYS } from './storage-keys'
 
 export function loadEvolutionLogs(courseId: string): EvolutionLog[] {
   try {
-    const raw = localStorage.getItem(LOG_PREFIX + courseId)
+    const raw = localStorage.getItem(STORAGE_KEYS.EVOLUTION_LOGS(courseId))
     return raw ? JSON.parse(raw) : []
   } catch {
     return []
@@ -279,5 +279,5 @@ export function loadEvolutionLogs(courseId: string): EvolutionLog[] {
 export function saveEvolutionLog(courseId: string, log: EvolutionLog): void {
   const logs = loadEvolutionLogs(courseId)
   logs.push(log)
-  localStorage.setItem(LOG_PREFIX + courseId, JSON.stringify(logs))
+  localStorage.setItem(STORAGE_KEYS.EVOLUTION_LOGS(courseId), JSON.stringify(logs))
 }

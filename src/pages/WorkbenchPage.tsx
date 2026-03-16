@@ -8,6 +8,7 @@ import MaterialReader from '@/components/workbench/MaterialReader'
 import RelatedMaterials from '@/components/workbench/RelatedMaterials'
 import AIToolPanel from '@/components/workbench/AIToolPanel'
 import SocraticChat from '@/components/workbench/SocraticChat'
+import ErrorBoundary from '@/components/ErrorBoundary'
 import { loadProfile } from '@/lib/student-model'
 
 export default function WorkbenchPage() {
@@ -70,12 +71,14 @@ export default function WorkbenchPage() {
           <span className="text-text-body">{material.name}</span>
         </nav>
 
-        <MaterialReader
-          material={material}
-          specialistMarkdown={specialistMarkdown}
-          activeTab={activeTab}
-          onTabChange={setActiveTab}
-        />
+        <ErrorBoundary>
+          <MaterialReader
+            material={material}
+            specialistMarkdown={specialistMarkdown}
+            activeTab={activeTab}
+            onTabChange={setActiveTab}
+          />
+        </ErrorBoundary>
 
         {/* Socratic dialogue toggle — elegant editorial style */}
         {specialistMarkdown && currentModuleId && (
@@ -128,14 +131,16 @@ export default function WorkbenchPage() {
         initial={{ opacity: 0, x: 16 }}
         animate={{ opacity: 1, x: 0 }}
         transition={{ delay: 0.15, duration: 0.35 }}
-        className="flex-[3] border-l border-border-warm bg-bg-card p-5 lg:p-6
+        className="flex-[3] lg:min-w-[400px] border-l border-border-warm bg-bg-card p-5 lg:p-6
                    lg:sticky lg:top-0 lg:h-screen lg:overflow-y-auto
                    max-lg:border-t max-lg:border-l-0"
       >
-        <AIToolPanel
-          materialId={material.id}
-          onModuleSelect={handleModuleSelect}
-        />
+        <ErrorBoundary>
+          <AIToolPanel
+            materialId={material.id}
+            onModuleSelect={handleModuleSelect}
+          />
+        </ErrorBoundary>
       </motion.aside>
     </div>
   )

@@ -208,40 +208,35 @@ export default function AgendaPage() {
         <WeekStrip selectedDate={selectedDate} onSelectDate={setSelectedDate} />
       </motion.div>
 
-      {/* Exam countdowns — prominently at top */}
+      {/* Exam countdowns (standalone, if any within 14 days) */}
       {upcomingExams.length > 0 && (
         <motion.div
           variants={fadeUp}
           custom={2}
           initial="hidden"
           animate="visible"
-          className="mb-6"
+          className="flex gap-4 overflow-x-auto mb-6"
         >
-          <h3 className="font-heading text-base text-text-main mb-3 flex items-center gap-2">
-            <Clock size={14} strokeWidth={1.5} className="text-red-primary" />
-            考试倒计时
-          </h3>
-          <div className="flex gap-3 overflow-x-auto pb-1">
-            {upcomingExams.map((config) => (
-              <ExamCountdown key={config.courseId} examConfig={config} />
-            ))}
-          </div>
+          {upcomingExams.map((config) => (
+            <ExamCountdown key={config.courseId} examConfig={config} />
+          ))}
         </motion.div>
       )}
 
-      {/* Main agenda timeline */}
+      {/* Main agenda timeline (exam-prep items hidden here — shown above) */}
       <motion.div variants={fadeUp} custom={3} initial="hidden" animate="visible">
         <AgendaTimeline
           agenda={agenda}
           examConfigs={examConfigs}
           onToggleComplete={handleToggleComplete}
+          hideExamPrep
         />
       </motion.div>
 
       {/* Floating add-task input */}
       <motion.div
         variants={fadeUp}
-        custom={4}
+        custom={5}
         initial="hidden"
         animate="visible"
         className="sticky bottom-6 mt-6"

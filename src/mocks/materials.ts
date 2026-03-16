@@ -35,11 +35,11 @@ export const materials: Material[] = [
 
 /* ---------- Dynamic user-uploaded materials (localStorage) ---------- */
 
-const STORAGE_KEY = 'zhijie_user_materials'
+import { STORAGE_KEYS } from '@/lib/storage-keys'
 
 function loadUserMaterials(): Material[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const raw = localStorage.getItem(STORAGE_KEYS.USER_MATERIALS)
     return raw ? JSON.parse(raw) : []
   } catch {
     return []
@@ -47,7 +47,7 @@ function loadUserMaterials(): Material[] {
 }
 
 function saveUserMaterials(items: Material[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(items))
+  localStorage.setItem(STORAGE_KEYS.USER_MATERIALS, JSON.stringify(items))
 }
 
 let _userMaterials: Material[] = loadUserMaterials()

@@ -3,6 +3,7 @@ import { motion } from 'framer-motion'
 import { FileText, Calendar, User, BookOpen, Loader2 } from 'lucide-react'
 
 const PdfAnnotator = lazy(() => import('./PdfAnnotator'))
+import ErrorBoundary from '@/components/ErrorBoundary'
 import ReactMarkdown from 'react-markdown'
 import remarkMath from 'remark-math'
 import remarkGfm from 'remark-gfm'
@@ -211,16 +212,18 @@ function OriginalContent({
 }) {
   if (isPdf && pdfUrl) {
     return (
-      <Suspense
-        fallback={
-          <div className="flex items-center justify-center h-[80vh] gap-2 text-text-muted">
-            <Loader2 size={20} className="animate-spin" />
-            <span className="text-sm">加载 PDF 阅读器...</span>
-          </div>
-        }
-      >
-        <PdfAnnotator pdfUrl={pdfUrl} materialId={material.id} />
-      </Suspense>
+      <ErrorBoundary>
+        <Suspense
+          fallback={
+            <div className="flex items-center justify-center h-[80vh] gap-2 text-text-muted">
+              <Loader2 size={20} className="animate-spin" />
+              <span className="text-sm">加载 PDF 阅读器...</span>
+            </div>
+          }
+        >
+          <PdfAnnotator pdfUrl={pdfUrl} materialId={material.id} />
+        </Suspense>
+      </ErrorBoundary>
     )
   }
 

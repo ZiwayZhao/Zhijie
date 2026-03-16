@@ -75,7 +75,7 @@ function DeckItem({ deck, index }: { deck: FlashcardDeck; index: number }) {
       transition={{ delay: index * 0.06, duration: 0.35 }}
     >
       {/* Left accent — book spine feel */}
-      <div className="w-1.5 shrink-0 bg-red-primary/20 group-hover:bg-red-primary transition-colors duration-300" />
+      <div className="w-1.5 shrink-0 bg-red-primary/80 group-hover:bg-red-primary transition-colors duration-300" />
 
       <div className="flex-1 flex items-center justify-between gap-4 p-5 pl-4">
         <div className="flex-1 min-w-0">
@@ -84,9 +84,9 @@ function DeckItem({ deck, index }: { deck: FlashcardDeck; index: number }) {
             {deck.courseName}
           </h3>
 
-          {/* Stats row — subtle inline labels */}
+          {/* Stats row — inline labels */}
           <div className="flex items-center gap-4 mt-2.5 flex-wrap">
-            <span className="text-[11px] text-text-muted font-mono">
+            <span className="text-[11px] text-text-body font-mono">
               {stats.total} cards
             </span>
             <StatLabel label="新" count={stats.newCount} color="var(--color-info)" />
@@ -96,8 +96,8 @@ function DeckItem({ deck, index }: { deck: FlashcardDeck; index: number }) {
 
           {/* Due count — editorial urgency */}
           {stats.due > 0 && (
-            <p className="text-sm text-red-primary mt-2 flex items-center gap-1.5">
-              <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-primary" />
+            <p className="text-sm text-red-primary font-medium mt-2 flex items-center gap-1.5">
+              <span className="inline-block w-2 h-2 rounded-full bg-red-primary animate-pulse" />
               {stats.due} 张卡片待复习
             </p>
           )}
@@ -112,7 +112,7 @@ function DeckItem({ deck, index }: { deck: FlashcardDeck; index: number }) {
           onClick={() => navigate(`/my/flashcards/${deck.courseId}/review`)}
           className={
             stats.due > 0
-              ? 'px-5 py-2 text-sm font-body border border-red-primary text-red-primary hover:bg-red-primary hover:text-white transition-colors whitespace-nowrap'
+              ? 'px-5 py-2 text-sm font-body bg-red-primary text-white hover:bg-red-dark transition-colors whitespace-nowrap'
               : 'px-5 py-2 text-sm font-body border border-border-warm text-text-muted cursor-not-allowed whitespace-nowrap'
           }
         >
@@ -155,9 +155,9 @@ export default function DeckList({ decks }: DeckListProps) {
         animate={{ opacity: 1 }}
         transition={{ duration: 0.4 }}
       >
-        <BookOpen size={32} strokeWidth={1} className="mx-auto text-text-muted/40 mb-4" />
-        <p className="font-heading text-lg text-text-muted">暂无闪卡</p>
-        <p className="text-sm text-text-muted/70 mt-2 max-w-xs mx-auto leading-relaxed">
+        <BookOpen size={32} strokeWidth={1} className="mx-auto text-text-muted mb-4" />
+        <p className="font-heading text-lg text-text-body">暂无闪卡</p>
+        <p className="text-sm text-text-muted mt-2 max-w-xs mx-auto leading-relaxed">
           学习课程材料后，AI 会自动为你生成闪卡，利用间隔重复高效记忆知识点
         </p>
       </motion.div>

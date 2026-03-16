@@ -87,7 +87,7 @@ export default function FlashcardCard({ note, flipped: controlledFlipped, onFlip
         className="relative w-full"
         style={{ transformStyle: 'preserve-3d' }}
         animate={{ rotateY: isFlipped ? 180 : 0 }}
-        transition={{ duration: 0.55, ease: [0.25, 0.1, 0.25, 1] }}
+        transition={{ duration: 0.6, ease: [0.22, 0.1, 0.25, 1] }}
       >
         {/* Front face */}
         <div

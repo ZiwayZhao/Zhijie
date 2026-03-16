@@ -224,11 +224,11 @@ export function getCourseModules(
 /*  Persistence                                                        */
 /* ------------------------------------------------------------------ */
 
-const PROFILE_KEY = 'zhijie_learning_profile'
+import { STORAGE_KEYS } from './storage-keys'
 
 export function loadProfile(): LearningProfile {
   try {
-    const raw = localStorage.getItem(PROFILE_KEY)
+    const raw = localStorage.getItem(STORAGE_KEYS.LEARNING_PROFILE)
     if (raw) {
       const parsed = JSON.parse(raw)
       if (parsed && typeof parsed === 'object' && parsed.userId) {
@@ -242,5 +242,5 @@ export function loadProfile(): LearningProfile {
 }
 
 export function saveProfile(profile: LearningProfile): void {
-  localStorage.setItem(PROFILE_KEY, JSON.stringify(profile))
+  localStorage.setItem(STORAGE_KEYS.LEARNING_PROFILE, JSON.stringify(profile))
 }

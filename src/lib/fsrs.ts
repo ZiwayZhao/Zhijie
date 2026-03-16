@@ -211,11 +211,11 @@ export function ratingColor(rating: 1 | 2 | 3 | 4): string {
 /*  Persistence                                                        */
 /* ------------------------------------------------------------------ */
 
-const STORAGE_PREFIX = 'zhijie_flashcards_'
+import { STORAGE_KEYS } from './storage-keys'
 
 export function loadDeck(courseId: string): FlashcardDeck | null {
   try {
-    const raw = localStorage.getItem(STORAGE_PREFIX + courseId)
+    const raw = localStorage.getItem(STORAGE_KEYS.FLASHCARDS(courseId))
     return raw ? JSON.parse(raw) : null
   } catch {
     return null
@@ -223,14 +223,14 @@ export function loadDeck(courseId: string): FlashcardDeck | null {
 }
 
 export function saveDeck(deck: FlashcardDeck): void {
-  localStorage.setItem(STORAGE_PREFIX + deck.courseId, JSON.stringify(deck))
+  localStorage.setItem(STORAGE_KEYS.FLASHCARDS(deck.courseId), JSON.stringify(deck))
 }
 
 export function loadAllDecks(): FlashcardDeck[] {
   const decks: FlashcardDeck[] = []
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i)
-    if (key?.startsWith(STORAGE_PREFIX)) {
+    if (key?.startsWith(STORAGE_KEYS.FLASHCARDS_PREFIX)) {
       try {
         const raw = localStorage.getItem(key)
         if (raw) {

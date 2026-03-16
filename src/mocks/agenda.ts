@@ -6,7 +6,9 @@ import { addDays, format } from 'date-fns'
 import type { ExamConfig, StudyItem, TodoItem } from '@/lib/agenda-engine'
 import { saveExamConfigs, saveTodos, loadExamConfigs, loadTodos } from '@/lib/agenda-engine'
 
-const MOCK_INIT_KEY = 'zhijie_mock_agenda_initialized'
+import { STORAGE_KEYS } from '@/lib/storage-keys'
+
+const MOCK_INIT_KEY = STORAGE_KEYS.MOCK_AGENDA_INIT
 
 function createMockExamConfigs(): ExamConfig[] {
   const today = new Date()

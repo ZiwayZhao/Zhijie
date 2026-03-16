@@ -34,12 +34,13 @@ interface PdfAnnotatorProps {
 /*  Persistence                                                        */
 /* ------------------------------------------------------------------ */
 
-const STORAGE_PREFIX = 'zhijie_highlights_'
+import { STORAGE_KEYS } from '@/lib/storage-keys'
+
 const COLORS = ['#FFEB3B', '#A5192E', '#4CAF50', '#2196F3', '#FF9800']
 
 function loadHighlights(id: string): CommentedHighlight[] {
   try {
-    const raw = localStorage.getItem(STORAGE_PREFIX + id)
+    const raw = localStorage.getItem(STORAGE_KEYS.HIGHLIGHTS(id))
     return raw ? JSON.parse(raw) : []
   } catch {
     return []
@@ -47,7 +48,7 @@ function loadHighlights(id: string): CommentedHighlight[] {
 }
 
 function saveHighlights(id: string, list: CommentedHighlight[]) {
-  localStorage.setItem(STORAGE_PREFIX + id, JSON.stringify(list))
+  localStorage.setItem(STORAGE_KEYS.HIGHLIGHTS(id), JSON.stringify(list))
 }
 
 /* ------------------------------------------------------------------ */

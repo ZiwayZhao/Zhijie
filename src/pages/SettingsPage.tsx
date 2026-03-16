@@ -17,6 +17,7 @@ import {
   Moon,
   Check,
 } from 'lucide-react'
+import { STORAGE_KEYS } from '@/lib/storage-keys'
 
 const fadeUp: Variants = {
   hidden: { opacity: 0, y: 12 },
@@ -136,7 +137,7 @@ export default function SettingsPage() {
     const keysToRemove: string[] = []
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i)
-      if (key?.startsWith('zhijie_')) {
+      if (key?.startsWith(STORAGE_KEYS.PREFIX)) {
         keysToRemove.push(key)
       }
     }
@@ -149,7 +150,7 @@ export default function SettingsPage() {
     const data: Record<string, unknown> = {}
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i)
-      if (key?.startsWith('zhijie_')) {
+      if (key?.startsWith(STORAGE_KEYS.PREFIX)) {
         try {
           data[key] = JSON.parse(localStorage.getItem(key) || '')
         } catch {

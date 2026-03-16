@@ -49,7 +49,7 @@ function NavItem({ to, label, icon: Icon }: { to: string; label: string; icon: t
 
 export default function Sidebar() {
   return (
-    <aside className="w-60 shrink-0 h-screen sticky top-0 border-r border-border-warm bg-bg-card flex flex-col">
+    <aside className="w-60 shrink-0 h-screen sticky top-0 border-r border-border-warm bg-bg-card flex flex-col overflow-hidden">
       {/* Brand — masthead style */}
       <div className="px-6 pt-7 pb-5 border-b border-border-warm">
         <h1 className="font-heading text-2xl text-red-primary tracking-tight m-0 leading-none">
@@ -61,7 +61,7 @@ export default function Sidebar() {
       </div>
 
       {/* Navigation — table-of-contents style */}
-      <nav className="flex-1 py-4 space-y-1 overflow-y-auto">
+      <nav className="flex-1 min-h-0 py-4 space-y-1 overflow-y-auto">
         {/* Main section */}
         <div className="space-y-0.5">
           {mainNav.map((item) => (

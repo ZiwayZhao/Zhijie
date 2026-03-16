@@ -6,6 +6,7 @@ import { useEffect, useState, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { motion, type Variants } from 'framer-motion'
 import { PenLine, FileText, BookOpen } from 'lucide-react'
+import { STORAGE_KEYS } from '@/lib/storage-keys'
 
 const fadeUp: Variants = {
   hidden: { opacity: 0, y: 12 },
@@ -46,7 +47,7 @@ function loadAllHighlights(): MaterialNotes[] {
 
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i)
-    if (!key || !key.startsWith('zhijie_highlights_')) continue
+    if (!key || !key.startsWith(STORAGE_KEYS.HIGHLIGHTS_PREFIX)) continue
 
     try {
       const raw = localStorage.getItem(key)
@@ -54,7 +55,7 @@ function loadAllHighlights(): MaterialNotes[] {
       const highlights: SavedHighlight[] = JSON.parse(raw)
       if (!Array.isArray(highlights) || highlights.length === 0) continue
 
-      const materialId = key.replace('zhijie_highlights_', '')
+      const materialId = key.replace(STORAGE_KEYS.HIGHLIGHTS_PREFIX, '')
       results.push({
         materialId,
         materialName: formatMaterialName(materialId),

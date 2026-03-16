@@ -195,12 +195,11 @@ export function generateDailyAgenda(
 /*  Persistence                                                        */
 /* ------------------------------------------------------------------ */
 
-const EXAM_CONFIG_KEY = 'zhijie_exam_configs'
-const TODOS_KEY = 'zhijie_agenda_todos'
+import { STORAGE_KEYS } from './storage-keys'
 
 export function loadExamConfigs(): ExamConfig[] {
   try {
-    const raw = localStorage.getItem(EXAM_CONFIG_KEY)
+    const raw = localStorage.getItem(STORAGE_KEYS.EXAM_CONFIGS)
     return raw ? JSON.parse(raw) : []
   } catch {
     return []
@@ -208,12 +207,12 @@ export function loadExamConfigs(): ExamConfig[] {
 }
 
 export function saveExamConfigs(configs: ExamConfig[]): void {
-  localStorage.setItem(EXAM_CONFIG_KEY, JSON.stringify(configs))
+  localStorage.setItem(STORAGE_KEYS.EXAM_CONFIGS, JSON.stringify(configs))
 }
 
 export function loadTodos(): TodoItem[] {
   try {
-    const raw = localStorage.getItem(TODOS_KEY)
+    const raw = localStorage.getItem(STORAGE_KEYS.AGENDA_TODOS)
     return raw ? JSON.parse(raw) : []
   } catch {
     return []
@@ -221,7 +220,7 @@ export function loadTodos(): TodoItem[] {
 }
 
 export function saveTodos(todos: TodoItem[]): void {
-  localStorage.setItem(TODOS_KEY, JSON.stringify(todos))
+  localStorage.setItem(STORAGE_KEYS.AGENDA_TODOS, JSON.stringify(todos))
 }
 
 /** Check if a date string represents today */

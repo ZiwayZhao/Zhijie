@@ -263,7 +263,9 @@ function buildDeck(courseId: string, notes: FlashcardNote[]): FlashcardDeck {
 /*  Public API                                                         */
 /* ------------------------------------------------------------------ */
 
-const MOCK_INIT_KEY = 'zhijie_mock_flashcards_initialized'
+import { STORAGE_KEYS } from '@/lib/storage-keys'
+
+const MOCK_INIT_KEY = STORAGE_KEYS.MOCK_FLASHCARDS_INIT
 
 /**
  * Populate localStorage with mock flashcard decks if not already present.
