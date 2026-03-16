@@ -1,6 +1,7 @@
 import { NavLink } from 'react-router-dom'
 import {
   Home,
+  CalendarDays,
   Compass,
   Upload,
   BookOpen,
@@ -12,6 +13,7 @@ import {
 
 const navItems = [
   { to: '/', label: '首页', icon: Home },
+  { to: '/agenda', label: '学习日程', icon: CalendarDays },
   { to: '/explore', label: '知识网络', icon: Compass },
   { to: '/upload', label: '上传', icon: Upload },
   { to: '/my/courses', label: '我的课程', icon: BookOpen },

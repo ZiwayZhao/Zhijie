@@ -3,6 +3,7 @@ import { useLocation } from 'react-router-dom'
 
 const pageTitles: Record<string, string> = {
   '/': '首页',
+  '/agenda': '学习日程',
   '/explore': '知识网络',
   '/upload': '上传',
   '/my/courses': '我的课程',

@@ -1,0 +1,155 @@
+/**
+ * AgendaItem — renders a single agenda entry with type-specific styling.
+ */
+import { motion } from 'framer-motion'
+import { Link } from 'react-router-dom'
+import { AlertTriangle, Brain, BookOpen, CheckCircle, Award, Square, CheckSquare } from 'lucide-react'
+import type { AgendaItem as AgendaItemType } from '@/lib/agenda-engine'
+
+interface AgendaItemProps {
+  item: AgendaItemType
+  index: number
+  onToggleComplete?: (id: string) => void
+}
+
+const typeConfig = {
+  'exam-prep': {
+    icon: AlertTriangle,
+    dotColor: 'bg-red-primary',
+    label: '备考',
+  },
+  'flashcard-review': {
+    icon: Brain,
+    dotColor: 'bg-accent-gold',
+    label: '闪卡复习',
+  },
+  study: {
+    icon: BookOpen,
+    dotColor: 'bg-text-muted',
+    label: '学习',
+  },
+  todo: {
+    icon: CheckCircle,
+    dotColor: 'bg-border-warm',
+    label: '待办',
+  },
+  milestone: {
+    icon: Award,
+    dotColor: 'bg-accent-gold',
+    label: '成就',
+  },
+} as const
+
+function getItemTitle(item: AgendaItemType): string {
+  switch (item.type) {
+    case 'exam-prep':
+      return `${item.courseName} 备考${item.moduleName ? ` · ${item.moduleName}` : ''}`
+    case 'flashcard-review':
+      return `${item.courseName} 闪卡复习（${item.dueCount}张到期）`
+    case 'study':
+      return `${item.courseName} · ${item.moduleName}`
+    case 'todo':
+      return item.title
+    case 'milestone':
+      return item.title
+  }
+}
+
+function getItemSubtext(item: AgendaItemType): string | null {
+  switch (item.type) {
+    case 'exam-prep':
+      return item.daysLeft === 0
+        ? '今天考试'
+        : item.daysLeft === 1
+          ? '明天考试'
+          : `${item.daysLeft}天后考试`
+    case 'flashcard-review':
+    case 'study':
+      return `预计${item.estimatedMin}分钟`
+    case 'exam-prep':
+      return `预计${item.estimatedMin}分钟`
+    default:
+      return null
+  }
+}
+
+function getItemLink(item: AgendaItemType): string | null {
+  if (item.type === 'flashcard-review') return '/my/flashcards'
+  if (item.type === 'exam-prep' || item.type === 'study') return `/course/${item.courseId}`
+  return null
+}
+
+export default function AgendaItem({ item, index, onToggleComplete }: AgendaItemProps) {
+  const config = typeConfig[item.type]
+  const Icon = config.icon
+  const title = getItemTitle(item)
+  const subtext = getItemSubtext(item)
+  const link = getItemLink(item)
+  const isCompleted = 'completed' in item && item.completed
+  const isTodo = item.type === 'todo'
+
+  const content = (
+    <div className={`flex items-start gap-3 py-3 ${isCompleted ? 'opacity-50' : ''}`}>
+      {/* Left dot / checkbox */}
+      {isTodo ? (
+        <button
+          onClick={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            onToggleComplete?.(item.id)
+          }}
+          className="mt-0.5 shrink-0 text-text-muted hover:text-red-primary transition-colors"
+        >
+          {isCompleted
+            ? <CheckSquare size={18} strokeWidth={1.5} />
+            : <Square size={18} strokeWidth={1.5} />
+          }
+        </button>
+      ) : (
+        <div className={`w-2.5 h-2.5 rounded-full ${config.dotColor} mt-1.5 shrink-0`} />
+      )}
+
+      {/* Content */}
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <Icon size={14} strokeWidth={1.5} className="text-text-muted shrink-0" />
+          <p className={`text-sm text-text-body leading-snug ${isCompleted ? 'line-through' : ''}`}>
+            {title}
+          </p>
+        </div>
+        {subtext && (
+          <p className="text-xs text-text-muted mt-0.5 ml-[22px]">{subtext}</p>
+        )}
+      </div>
+
+      {/* Priority / urgency badge */}
+      {item.type === 'exam-prep' && item.daysLeft <= 3 && (
+        <span className="text-xs px-1.5 py-0.5 rounded border border-red-primary/30 text-red-primary shrink-0">
+          紧急
+        </span>
+      )}
+      {item.type === 'study' && item.priority === 'high' && (
+        <span className="text-xs px-1.5 py-0.5 rounded border border-accent-gold/30 text-accent-gold shrink-0">
+          重点
+        </span>
+      )}
+    </div>
+  )
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: index * 0.05, duration: 0.3, ease: 'easeOut' }}
+      className="border-b border-border-warm last:border-b-0"
+    >
+      {link && !isCompleted ? (
+        <Link to={link} className="block no-underline hover:bg-bg-accent/50 transition-colors -mx-2 px-2 rounded">
+          {content}
+        </Link>
+      ) : (
+        content
+      )}
+    </motion.div>
+  )
+}

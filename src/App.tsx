@@ -11,6 +11,7 @@ import MyNotesPage from '@/pages/MyNotesPage'
 import SettingsPage from '@/pages/SettingsPage'
 import FlashcardsPage from '@/pages/FlashcardsPage'
 import ReviewPage from '@/pages/ReviewPage'
+import AgendaPage from '@/pages/AgendaPage'
 
 export default function App() {
   return (
@@ -26,6 +27,7 @@ export default function App() {
         <Route path="/my/notes" element={<MyNotesPage />} />
         <Route path="/my/flashcards" element={<FlashcardsPage />} />
         <Route path="/my/flashcards/:deckId/review" element={<ReviewPage />} />
+        <Route path="/agenda" element={<AgendaPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Routes>
     </Layout>
