@@ -233,7 +233,12 @@ export function loadAllDecks(): FlashcardDeck[] {
     if (key?.startsWith(STORAGE_PREFIX)) {
       try {
         const raw = localStorage.getItem(key)
-        if (raw) decks.push(JSON.parse(raw))
+        if (raw) {
+          const parsed = JSON.parse(raw)
+          if (parsed && typeof parsed === 'object' && parsed.courseId) {
+            decks.push(parsed)
+          }
+        }
       } catch {
         // skip corrupt data
       }

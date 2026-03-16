@@ -2,10 +2,10 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "zhijie-dev",
+      "name": "dev",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["vite", "--host"],
-      "port": 5173
+      "runtimeArgs": ["vite", "--port", "51772"],
+      "port": 51772
     }
   ]
 }
