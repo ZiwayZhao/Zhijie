@@ -3,7 +3,7 @@
  * Handles token storage, refresh, and authenticated requests.
  */
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000/api'
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8003/api'
 const AUTH_BASE = `${API_BASE}/v1/auth`
 
 /* ---------- Types ---------- */
@@ -140,7 +140,7 @@ export async function authFetch(
 
 /* ---------- Auth API Functions ---------- */
 
-export async function register(payload: RegisterPayload): Promise<UserResponse> {
+export async function register(payload: RegisterPayload): Promise<TokenPair> {
   const res = await fetch(`${AUTH_BASE}/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -152,7 +152,9 @@ export async function register(payload: RegisterPayload): Promise<UserResponse> 
     throw new Error(err.detail)
   }
 
-  return (await res.json()) as UserResponse
+  const tokens = (await res.json()) as TokenPair
+  storeTokens(tokens)
+  return tokens
 }
 
 export async function login(payload: LoginPayload): Promise<TokenPair> {

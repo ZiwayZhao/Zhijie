@@ -28,6 +28,8 @@ RUN groupadd -r zhijie && useradd -r -g zhijie zhijie
 
 COPY . .
 
+ENV PYTHONPATH=/code
+
 RUN chown -R zhijie:zhijie /code
 USER zhijie
 

@@ -3,9 +3,9 @@
  * Connects to real API via authFetch, with mock fallback for dev.
  */
 
-import { authFetch } from '@/lib/auth-api'
+import { authFetch, getAccessToken } from '@/lib/auth-api'
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000/api'
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8003/api'
 const AUTH_API = `${API_BASE}/v1`
 
 const USE_MOCK = import.meta.env.VITE_USE_MOCK !== 'false'
@@ -194,10 +194,12 @@ export function subscribeProgress(
     return subscribeMockProgress(taskId, onProgress)
   }
 
-  // Real SSE — uses EventSource to /disassembly/tasks/{taskId}/status
-  const evtSource = new EventSource(
-    `${AUTH_API}/disassembly/tasks/${taskId}/status`,
-  )
+  // Real SSE — EventSource doesn't support Authorization header,
+  // so we pass the token as a query parameter
+  const token = getAccessToken()
+  const sseUrl = new URL(`${AUTH_API}/disassembly/tasks/${taskId}/status`, window.location.origin)
+  if (token) sseUrl.searchParams.set('token', token)
+  const evtSource = new EventSource(sseUrl.toString())
 
   evtSource.addEventListener('status', (e) => {
     try {

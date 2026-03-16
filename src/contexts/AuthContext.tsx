@@ -106,9 +106,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const register = useCallback(async (payload: RegisterPayload) => {
+    // Backend /register already returns TokenPair and stores tokens
     await apiRegister(payload)
-    // After registration, auto-login
-    await apiLogin({ email: payload.email, password: payload.password })
     const u = await getCurrentUser()
     setUser(u)
   }, [])

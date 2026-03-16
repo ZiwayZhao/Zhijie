@@ -1,6 +1,7 @@
 # Web framework
 fastapi==0.115.12
 uvicorn[standard]==0.34.2
+sse-starlette==2.2.1
 pydantic[email]==2.11.3
 pydantic-settings==2.9.1
 
@@ -10,8 +11,8 @@ asyncpg==0.30.0
 alembic==1.15.2
 greenlet==3.2.2
 
-# Auth (PyJWT over python-jose per Codex review)
-PyJWT[crypto]==2.10.1
+# Auth (PyJWT — pin to 2.9.x for redis 5.3 compat)
+PyJWT[crypto]==2.9.0
 argon2-cffi==23.1.0
 httpx==0.28.1
 

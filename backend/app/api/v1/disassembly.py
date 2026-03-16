@@ -154,13 +154,28 @@ async def start_analysis(
 @router.get("/tasks/{task_id}/status")
 async def task_status_sse(
     task_id: uuid.UUID,
+    token: str | None = None,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
 ):
     """SSE stream for pipeline progress.
 
+    EventSource doesn't support Authorization headers, so we accept
+    the JWT as a query parameter (?token=...) in addition to the header.
     First sends current DB state, then subscribes to Redis Pub/Sub for real-time updates.
     """
+    # Authenticate via query param since EventSource can't send headers
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing token")
+    from app.core.security import decode_access_token
+    payload = decode_access_token(token)
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    user_result = await db.execute(select(User).where(User.id == uuid.UUID(user_id)))
+    user = user_result.scalar_one_or_none()
+    if not user or not user.is_active:
+        raise HTTPException(status_code=401, detail="User not found or inactive")
+
     task = await _get_task_or_404(task_id, user, db)
 
     async def event_generator():
