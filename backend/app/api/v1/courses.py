@@ -44,9 +44,10 @@ async def list_courses(
             )
         stmt = stmt.where(Course.category_id == cat_id)
 
-    # Search filter
+    # Search filter (escape LIKE wildcards to prevent wildcard injection)
     if search:
-        pattern = f"%{search}%"
+        escaped = search.replace("%", r"\%").replace("_", r"\_")
+        pattern = f"%{escaped}%"
         stmt = stmt.where(
             Course.name.ilike(pattern)
             | Course.description.ilike(pattern)

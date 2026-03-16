@@ -10,6 +10,8 @@ import uuid
 from dataclasses import dataclass, field
 from urllib.parse import quote
 
+import asyncio
+
 import httpx
 import yaml
 
@@ -116,7 +118,7 @@ class ParsedCourse:
 
 def _count_stars(text: str) -> int:
     """Count star emojis to determine difficulty."""
-    return text.count("\u2b50") or text.count("\U0001f31f") or 3
+    return text.count("\u2b50") + text.count("\U0001f31f") or 3
 
 
 def _extract_hours(text: str) -> int | None:
@@ -139,7 +141,7 @@ def _extract_url(text: str) -> str | None:
     return m.group(0).rstrip(".,;)") if m else None
 
 
-def parse_nav(nav_data: list) -> list[tuple[str, str, str | None]]:
+def parse_nav(nav_data: list) -> list[tuple[str, str, str, str | None]]:
     """Parse mkdocs nav into (course_name, md_path, category) tuples.
 
     Returns list of (name, md_path, category, subcategory).
@@ -179,20 +181,26 @@ async def fetch_mkdocs_nav() -> list:
     return data.get("nav", [])
 
 
-async def fetch_course_markdown(md_path: str) -> str | None:
+async def fetch_course_markdown(
+    md_path: str, client: httpx.AsyncClient | None = None,
+) -> str | None:
     """Fetch raw markdown for a single course page."""
     encoded = quote(md_path, safe="/")
     url = f"{RAW_BASE}/docs/{encoded}"
-    async with httpx.AsyncClient(timeout=20) as client:
-        try:
-            resp = await client.get(url)
-            if resp.status_code == 200:
-                return resp.text
-            logger.warning("HTTP %d for %s", resp.status_code, url)
-            return None
-        except httpx.HTTPError as exc:
-            logger.warning("Failed to fetch %s: %s", url, exc)
-            return None
+    own_client = client is None
+    c = client or httpx.AsyncClient(timeout=20)
+    try:
+        resp = await c.get(url)
+        if resp.status_code == 200:
+            return resp.text
+        logger.warning("HTTP %d for %s", resp.status_code, url)
+        return None
+    except httpx.HTTPError as exc:
+        logger.warning("Failed to fetch %s: %s", url, exc)
+        return None
+    finally:
+        if own_client:
+            await c.aclose()
 
 
 def parse_course_markdown(md: str, name: str, md_path: str, cat: str,
@@ -291,19 +299,20 @@ async def scrape_all_courses() -> tuple[dict[str, list[str]], list[ParsedCourse]
         if subcat and subcat not in categories[cat]:
             categories[cat].append(subcat)
 
-    # Fetch all course markdowns
+    # Fetch all course markdowns with shared client + rate limiting
     courses: list[ParsedCourse] = []
-    for name, md_path, cat, subcat in entries:
-        # Skip non-course pages (roadmaps etc.)
-        if md_path.endswith("roadmap.md"):
-            continue
-        logger.info("Fetching: %s → %s", name, md_path)
-        md = await fetch_course_markdown(md_path)
-        if md is None:
-            logger.warning("Skipped (fetch failed): %s", md_path)
-            continue
-        parsed = parse_course_markdown(md, name, md_path, cat, subcat)
-        courses.append(parsed)
+    async with httpx.AsyncClient(timeout=20) as client:
+        for name, md_path, cat, subcat in entries:
+            if md_path.endswith("roadmap.md"):
+                continue
+            logger.info("Fetching: %s → %s", name, md_path)
+            md = await fetch_course_markdown(md_path, client=client)
+            if md is None:
+                logger.warning("Skipped (fetch failed): %s", md_path)
+                continue
+            parsed = parse_course_markdown(md, name, md_path, cat, subcat)
+            courses.append(parsed)
+            await asyncio.sleep(0.15)  # rate limit: ~6 req/s
 
     logger.info(
         "Scraped %d courses across %d categories",
