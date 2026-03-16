@@ -23,8 +23,8 @@ celery[redis]==5.5.2
 # S3-compatible storage
 boto3==1.39.2
 
-# LLM
-anthropic==0.52.0
+# LLM (OpenRouter — OpenAI-compatible)
+openai==1.82.0
 
 # PDF parsing
 pymupdf4llm==0.0.17

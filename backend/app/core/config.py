@@ -39,13 +39,14 @@ class Settings(BaseSettings):
     s3_bucket_name: str = "zhijie-materials"
     s3_region: str = "us-east-1"
 
-    # Anthropic
-    anthropic_api_key: str = ""
+    # LLM (OpenRouter)
+    openrouter_api_key: str = Field(default="", alias="OPENROUTER_API_KEY")
 
     # CORS
     cors_origins: list[str] = Field(default_factory=lambda: [
         "http://localhost:5173",
         "http://localhost:3000",
+        "http://localhost:51772",
     ])
 
     @field_validator("secret_key")

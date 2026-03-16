@@ -1,11 +1,11 @@
-"""Anthropic Claude client — singleton, structured output, retry, token tracking.
+"""OpenRouter LLM client — singleton, structured output (function calling), retry, token tracking.
 
 Usage:
     from app.services.llm_client import get_llm_client
 
     client = get_llm_client()
     result = await client.structured_output(
-        model="claude-sonnet-4-5-20250514",
+        model="anthropic/claude-sonnet-4-5-20250514",
         system="You are...",
         messages=[{"role": "user", "content": "..."}],
         response_schema=MyPydanticModel,
@@ -16,13 +16,14 @@ Usage:
 """
 
 import asyncio
+import json
 import logging
 import time
 import uuid
 from dataclasses import dataclass
 from typing import Any, AsyncGenerator, TypeVar
 
-import anthropic
+from openai import AsyncOpenAI, APIConnectionError, APIStatusError, RateLimitError
 from pydantic import BaseModel
 
 from app.core.config import settings
@@ -32,15 +33,16 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T", bound=BaseModel)
 
 # Singleton
-_client: anthropic.AsyncAnthropic | None = None
+_client: AsyncOpenAI | None = None
 
 
-def get_anthropic_client() -> anthropic.AsyncAnthropic:
-    """Lazy singleton AsyncAnthropic client."""
+def get_openai_client() -> AsyncOpenAI:
+    """Lazy singleton AsyncOpenAI client configured for OpenRouter."""
     global _client
     if _client is None:
-        _client = anthropic.AsyncAnthropic(
-            api_key=settings.anthropic_api_key,
+        _client = AsyncOpenAI(
+            api_key=settings.openrouter_api_key,
+            base_url="https://openrouter.ai/api/v1",
             max_retries=0,  # We handle retries ourselves
         )
     return _client
@@ -67,7 +69,7 @@ class LLMClient:
     """High-level LLM client with retry, structured output, and tracking."""
 
     def __init__(self):
-        self._client = get_anthropic_client()
+        self._client = get_openai_client()
 
     async def structured_output(
         self,
@@ -81,13 +83,13 @@ class LLMClient:
         run_id: str | None = None,
         max_retries: int = 2,
     ) -> LLMResult:
-        """Call Claude with Structured Outputs (tool_use mode) → Pydantic model.
+        """Call LLM with function calling → Pydantic model.
 
-        Uses Claude's tool_use feature to guarantee JSON structure,
+        Uses OpenAI-compatible function calling to get structured JSON,
         then validates with Pydantic as a second layer.
 
         Args:
-            model: Claude model ID.
+            model: Model ID (OpenRouter format, e.g. "anthropic/claude-sonnet-4-5-20250514").
             system: System prompt.
             messages: Conversation messages.
             response_schema: Pydantic model class for the response.
@@ -105,54 +107,65 @@ class LLMClient:
         if run_id is None:
             run_id = uuid.uuid4().hex
 
-        # Build tool definition from Pydantic schema
+        # Build function definition from Pydantic schema
         schema_name = response_schema.__name__
-        tool_def = {
-            "name": schema_name,
-            "description": f"Output structured {schema_name}",
-            "input_schema": response_schema.model_json_schema(),
+        func_def = {
+            "type": "function",
+            "function": {
+                "name": schema_name,
+                "description": f"Output structured {schema_name}",
+                "parameters": response_schema.model_json_schema(),
+            },
         }
+
+        # Build messages with system prompt
+        full_messages = [{"role": "system", "content": system}] + messages
 
         last_error = None
         for attempt in range(max_retries + 1):
             try:
                 start = time.monotonic()
-                response = await self._client.messages.create(
+                response = await self._client.chat.completions.create(
                     model=model,
-                    system=system,
-                    messages=messages,
-                    tools=[tool_def],
-                    tool_choice={"type": "tool", "name": schema_name},
+                    messages=full_messages,
+                    tools=[func_def],
+                    tool_choice={"type": "function", "function": {"name": schema_name}},
                     max_tokens=max_tokens,
                 )
                 elapsed_ms = int((time.monotonic() - start) * 1000)
 
-                # Extract tool_use block
-                tool_block = None
-                for block in response.content:
-                    if block.type == "tool_use" and block.name == schema_name:
-                        tool_block = block
-                        break
+                # Extract function call from response
+                choice = response.choices[0]
+                tool_call = None
+                if choice.message.tool_calls:
+                    for tc in choice.message.tool_calls:
+                        if tc.function.name == schema_name:
+                            tool_call = tc
+                            break
 
-                if tool_block is None:
+                if tool_call is None:
                     raise LLMError(
-                        f"No tool_use block named '{schema_name}' in response"
+                        f"No function call named '{schema_name}' in response"
                     )
 
-                # Pydantic validation (second layer)
-                parsed = response_schema.model_validate(tool_block.input)
+                # Parse JSON arguments
+                raw_args = json.loads(tool_call.function.arguments)
 
+                # Pydantic validation (second layer)
+                parsed = response_schema.model_validate(raw_args)
+
+                usage = response.usage or type("Usage", (), {"prompt_tokens": 0, "completion_tokens": 0})()
                 return LLMResult(
                     data=parsed,
-                    input_tokens=response.usage.input_tokens,
-                    output_tokens=response.usage.output_tokens,
+                    input_tokens=getattr(usage, "prompt_tokens", 0),
+                    output_tokens=getattr(usage, "completion_tokens", 0),
                     latency_ms=elapsed_ms,
                     model=model,
                     run_id=run_id,
                     prompt_version=prompt_version,
                 )
 
-            except anthropic.RateLimitError:
+            except RateLimitError:
                 wait = 2 ** attempt  # 1s, 2s, 4s
                 logger.warning(
                     "Rate limited (attempt %d/%d), waiting %ds",
@@ -161,7 +174,7 @@ class LLMClient:
                 await asyncio.sleep(wait)
                 last_error = LLMError("Rate limit exceeded after retries")
 
-            except anthropic.APIStatusError as e:
+            except APIStatusError as e:
                 if e.status_code >= 500 and attempt < max_retries:
                     wait = 2 ** attempt
                     logger.warning(
@@ -173,7 +186,7 @@ class LLMClient:
                 else:
                     raise LLMError(f"API error {e.status_code}: {e.message}") from e
 
-            except anthropic.APIConnectionError as e:
+            except APIConnectionError as e:
                 if attempt < max_retries:
                     wait = 2 ** attempt
                     logger.warning(
@@ -195,15 +208,18 @@ class LLMClient:
         messages: list[dict],
         max_tokens: int = 2048,
     ) -> AsyncGenerator[str, None]:
-        """Stream text from Claude (for Socratic dialogue in Sprint 3)."""
-        async with self._client.messages.stream(
+        """Stream text from LLM (for Socratic dialogue)."""
+        full_messages = [{"role": "system", "content": system}] + messages
+        stream = await self._client.chat.completions.create(
             model=model,
-            system=system,
-            messages=messages,
+            messages=full_messages,
             max_tokens=max_tokens,
-        ) as stream:
-            async for text in stream.text_stream:
-                yield text
+            stream=True,
+        )
+        async for chunk in stream:
+            delta = chunk.choices[0].delta if chunk.choices else None
+            if delta and delta.content:
+                yield delta.content
 
 
 # Module-level convenience

@@ -23,7 +23,7 @@ from app.services.s3_client import get_s3_client
 logger = logging.getLogger(__name__)
 
 PROMPT_VERSION = "spec_v1"
-MODEL = "claude-sonnet-4-5-20250514"
+MODEL = "anthropic/claude-sonnet-4-5-20250514"
 MAX_CONCURRENT = 3  # Semaphore limit to avoid rate limiting
 SINGLE_MODULE_TIMEOUT = 120  # seconds
 

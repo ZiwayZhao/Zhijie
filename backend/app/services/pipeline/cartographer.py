@@ -15,7 +15,7 @@ from app.services.pdf_parser import ParsedPDF
 logger = logging.getLogger(__name__)
 
 PROMPT_VERSION = "cart_v1"
-MODEL = "claude-sonnet-4-5-20250514"
+MODEL = "anthropic/claude-sonnet-4-5-20250514"
 
 # ── Structured Output Schema ─────────────────────────────────────
 
