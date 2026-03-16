@@ -181,10 +181,18 @@ async def fetch_mkdocs_nav() -> list:
     return data.get("nav", [])
 
 
+_MD_PATH_RE = re.compile(r"^[\w\-/ .()（）\u4e00-\u9fff+]+\.md$")
+_MAX_RESPONSE_BYTES = 1024 * 1024  # 1 MB
+
+
 async def fetch_course_markdown(
     md_path: str, client: httpx.AsyncClient | None = None,
 ) -> str | None:
     """Fetch raw markdown for a single course page."""
+    # Validate path: reject traversal and non-md files
+    if ".." in md_path or md_path.startswith("/") or not _MD_PATH_RE.match(md_path):
+        logger.warning("Rejected invalid md_path: %s", md_path)
+        return None
     encoded = quote(md_path, safe="/")
     url = f"{RAW_BASE}/docs/{encoded}"
     own_client = client is None
@@ -192,6 +200,9 @@ async def fetch_course_markdown(
     try:
         resp = await c.get(url)
         if resp.status_code == 200:
+            if len(resp.content) > _MAX_RESPONSE_BYTES:
+                logger.warning("Response too large (%d bytes): %s", len(resp.content), url)
+                return None
             return resp.text
         logger.warning("HTTP %d for %s", resp.status_code, url)
         return None
@@ -289,6 +300,8 @@ async def scrape_all_courses() -> tuple[dict[str, list[str]], list[ParsedCourse]
     logger.info("Fetching mkdocs.yml navigation...")
     nav = await fetch_mkdocs_nav()
     entries = parse_nav(nav)
+    if len(entries) > 1000:
+        raise ValueError(f"Too many nav entries ({len(entries)}), aborting")
     logger.info("Found %d course entries in nav", len(entries))
 
     # Collect categories

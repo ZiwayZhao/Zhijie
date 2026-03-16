@@ -24,7 +24,7 @@ async def list_courses(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     category: str | None = Query(None, description="Category slug filter"),
-    search: str | None = Query(None, description="Search in name/description"),
+    search: str | None = Query(None, min_length=1, max_length=100, description="Search in name/description"),
     language: str | None = Query(None),
     difficulty: int | None = Query(None, ge=1, le=5),
 ):
@@ -44,14 +44,18 @@ async def list_courses(
             )
         stmt = stmt.where(Course.category_id == cat_id)
 
-    # Search filter (escape LIKE wildcards to prevent wildcard injection)
+    # Search filter (escape backslash first, then LIKE wildcards)
     if search:
-        escaped = search.replace("%", r"\%").replace("_", r"\_")
+        escaped = (
+            search.replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_")
+        )
         pattern = f"%{escaped}%"
         stmt = stmt.where(
-            Course.name.ilike(pattern)
-            | Course.description.ilike(pattern)
-            | Course.university.ilike(pattern)
+            Course.name.ilike(pattern, escape="\\")
+            | Course.description.ilike(pattern, escape="\\")
+            | Course.university.ilike(pattern, escape="\\")
         )
 
     # Language filter

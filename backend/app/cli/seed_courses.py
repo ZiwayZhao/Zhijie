@@ -34,22 +34,27 @@ async def _upsert_categories(
     db: AsyncSession,
     categories_map: dict[str, list[str]],
 ) -> dict[str, uuid.UUID]:
-    """Upsert categories and sub-categories, return name→id map."""
-    cat_id_map: dict[str, uuid.UUID] = {}
+    """Upsert categories and sub-categories, return (cat, subcat)→id map.
+
+    Keys use composite (cat_name, subcat_name) tuples to avoid
+    collisions when different parent categories share subcategory names.
+    Top-level categories use (cat_name, None) as key.
+    """
+    cat_id_map: dict[tuple[str, str | None], uuid.UUID] = {}
     sort_order = 0
     for cat_name in categories_map:
         slug = _slugify(cat_name)
         stmt = select(CourseCategory).where(CourseCategory.slug == slug)
         existing = (await db.execute(stmt)).scalar_one_or_none()
         if existing:
-            cat_id_map[cat_name] = existing.id
+            cat_id_map[(cat_name, None)] = existing.id
         else:
             cat = CourseCategory(
                 id=uuid.uuid4(), name=cat_name,
                 slug=slug, sort_order=sort_order,
             )
             db.add(cat)
-            cat_id_map[cat_name] = cat.id
+            cat_id_map[(cat_name, None)] = cat.id
             logger.info("Created category: %s (%s)", cat_name, slug)
         sort_order += 1
 
@@ -58,14 +63,14 @@ async def _upsert_categories(
             stmt = select(CourseCategory).where(CourseCategory.slug == sub_slug)
             existing = (await db.execute(stmt)).scalar_one_or_none()
             if existing:
-                cat_id_map[subcat_name] = existing.id
+                cat_id_map[(cat_name, subcat_name)] = existing.id
             else:
                 sub = CourseCategory(
                     id=uuid.uuid4(), name=subcat_name, slug=sub_slug,
-                    sort_order=sort_order, parent_id=cat_id_map[cat_name],
+                    sort_order=sort_order, parent_id=cat_id_map[(cat_name, None)],
                 )
                 db.add(sub)
-                cat_id_map[subcat_name] = sub.id
+                cat_id_map[(cat_name, subcat_name)] = sub.id
                 logger.info("  Sub-category: %s (%s)", subcat_name, sub_slug)
             sort_order += 1
 
@@ -94,14 +99,17 @@ def _apply_course_fields(target: Course, pc: ParsedCourse, category_id: uuid.UUI
 async def _upsert_courses(
     db: AsyncSession,
     courses: list[ParsedCourse],
-    cat_id_map: dict[str, uuid.UUID],
+    cat_id_map: dict[tuple[str, str | None], uuid.UUID],
 ) -> tuple[int, int]:
     """Upsert courses, return (created, updated) counts."""
     created = updated = 0
     seen_slugs: set[str] = set()
     for pc in courses:
-        cat_key = pc.subcategory or pc.category
-        category_id = cat_id_map.get(cat_key) or cat_id_map.get(pc.category)
+        # Use composite key: (category, subcategory) → fallback to (category, None)
+        category_id = (
+            cat_id_map.get((pc.category, pc.subcategory))
+            or cat_id_map.get((pc.category, None))
+        )
         if category_id is None:
             logger.warning("No category for course: %s", pc.name)
             continue
