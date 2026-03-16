@@ -4,6 +4,16 @@ import { motion, type Variants } from 'framer-motion'
 import { BookMarked, Users, Star, Globe, ExternalLink, Upload, Clock, Code2, GraduationCap } from 'lucide-react'
 import { fetchCourse, fetchCourses, type CourseItem } from '@/lib/api'
 
+/** Only allow http/https URLs to prevent javascript:/data: XSS */
+function isSafeUrl(url: string): boolean {
+  try {
+    const u = new URL(url)
+    return u.protocol === 'http:' || u.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
 const fadeUp: Variants = {
   hidden: { opacity: 0, y: 16 },
   visible: (i: number) => ({
@@ -30,12 +40,14 @@ export default function CoursePage() {
         if (cancelled) return
         if (!c) { setError('课程未找到'); return }
         setCourse(c)
-        // Fetch related courses from the same category
-        return fetchCourses({ pageSize: 6, category: c.category || undefined }).then((r) => {
-          if (!cancelled) {
-            setRelated(r.items.filter((rc) => rc.slug !== c.slug).slice(0, 4))
-          }
-        })
+        // Fetch related courses (failure here should not affect main course display)
+        fetchCourses({ pageSize: 6, category: c.categorySlug || undefined })
+          .then((r) => {
+            if (!cancelled) {
+              setRelated(r.items.filter((rc) => rc.slug !== c.slug).slice(0, 4))
+            }
+          })
+          .catch(() => { /* related courses failure is non-critical */ })
       })
       .catch(() => { if (!cancelled) setError('加载失败') })
       .finally(() => { if (!cancelled) setLoading(false) })
@@ -183,7 +195,7 @@ function CourseContent({ course }: { course: CourseItem }) {
             课程资源
           </h2>
           <div className="space-y-3">
-            {course.websiteUrl && (
+            {course.websiteUrl && isSafeUrl(course.websiteUrl) && (
               <a
                 href={course.websiteUrl}
                 target="_blank"
@@ -194,7 +206,7 @@ function CourseContent({ course }: { course: CourseItem }) {
                 课程官网
               </a>
             )}
-            {course.videoUrl && (
+            {course.videoUrl && isSafeUrl(course.videoUrl) && (
               <a
                 href={course.videoUrl}
                 target="_blank"

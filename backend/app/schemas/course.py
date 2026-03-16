@@ -19,6 +19,7 @@ class CourseResponse(BaseModel):
     id: uuid.UUID
     category_id: uuid.UUID
     category_name: str = ""
+    category_slug: str = ""
     name: str
     slug: str
     university: str | None = None

@@ -47,9 +47,11 @@ export default function UploadPage() {
         setProgress(pctBase)
 
         // Step 1: Request presigned URL
+        // Determine content type once and use consistently for both presign and upload
+        const contentType = f.file.type || 'application/pdf'
         const { materialId, uploadUrl } = await requestUpload({
           filename: f.file.name,
-          contentType: f.file.type || 'application/pdf',
+          contentType,
           fileSize: f.file.size,
           title: f.file.name.replace(/\.[^.]+$/, ''),
           materialType: data.materialType || 'pdf',
@@ -59,8 +61,8 @@ export default function UploadPage() {
 
         setProgress(pctBase + Math.round((1 / total) * 40))
 
-        // Step 2: Upload file to S3
-        await uploadFileToS3(uploadUrl, f.file)
+        // Step 2: Upload file to S3 with the same content type
+        await uploadFileToS3(uploadUrl, f.file, contentType)
 
         setProgress(pctBase + Math.round((1 / total) * 80))
 

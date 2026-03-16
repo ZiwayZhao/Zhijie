@@ -81,6 +81,7 @@ async def list_courses(
         resp = CourseResponse.model_validate(c)
         if c.category:
             resp.category_name = c.category.name
+            resp.category_slug = c.category.slug
         items.append(resp)
 
     return CourseListResponse(
@@ -131,4 +132,5 @@ async def get_course(
     resp = CourseResponse.model_validate(course)
     if course.category:
         resp.category_name = course.category.name
+        resp.category_slug = course.category.slug
     return resp

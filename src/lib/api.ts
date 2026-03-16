@@ -41,6 +41,7 @@ export interface CourseItem {
   materialCount: number
   studentCount: number
   category: string
+  categorySlug: string
   categoryId: string
   language: string
   programmingLang: string | null
@@ -70,6 +71,7 @@ function mapCourse(raw: any): CourseItem {
     materialCount: raw.material_count ?? 0,
     studentCount: raw.student_count ?? 0,
     category: raw.category_name || '',
+    categorySlug: raw.category_slug || '',
     categoryId: raw.category_id,
     language: raw.language || 'en',
     programmingLang: raw.programming_lang,
@@ -178,10 +180,10 @@ export async function requestUpload(params: {
   return { materialId: data.material_id, uploadUrl: data.upload_url, s3Key: data.s3_key }
 }
 
-export async function uploadFileToS3(uploadUrl: string, file: File): Promise<void> {
+export async function uploadFileToS3(uploadUrl: string, file: File, contentType?: string): Promise<void> {
   const res = await fetch(uploadUrl, {
     method: 'PUT',
-    headers: { 'Content-Type': file.type },
+    headers: { 'Content-Type': contentType || file.type || 'application/octet-stream' },
     body: file,
   })
   if (!res.ok) throw new Error(`S3 upload failed: ${res.status}`)
