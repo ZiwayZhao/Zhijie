@@ -1,9 +1,12 @@
 /**
- * API service layer for science1204 backend.
- * Uses mock fallbacks when the backend is unavailable.
+ * API service layer for 智阶 backend.
+ * Connects to real API via authFetch, with mock fallback for dev.
  */
 
+import { authFetch } from '@/lib/auth-api'
+
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000/api'
+const AUTH_API = `${API_BASE}/v1`
 
 const USE_MOCK = import.meta.env.VITE_USE_MOCK !== 'false'
 
@@ -12,40 +15,140 @@ const USE_MOCK = import.meta.env.VITE_USE_MOCK !== 'false'
 export interface DisassemblyModule {
   id: string
   name: string
-  pages: string
+  description: string | null
+  page_range_start: number
+  page_range_end: number
+  pages: string // derived "start-end" for display
   examWeight: 'high' | 'medium' | 'low'
+  sort_order: number
+  has_specialist: boolean
 }
 
 export interface DisassemblyTask {
-  taskId: string
-  status: 'pending' | 'processing' | 'completed' | 'error'
+  task_id: string
+  material_id: string
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
+  phase: string
   progress: number
-  modules?: DisassemblyModule[]
-  currentStep?: string
+  attempt: number
+  error_message: string | null
+  error_phase: string | null
+  started_at: string | null
+  completed_at: string | null
+  created_at: string
 }
 
 export interface SpecialistResult {
   moduleId: string
   moduleName: string
   markdown: string
+  summary: string | null
+  key_concepts: string[]
+  exam_traps: string[]
+}
+
+export interface MCQuestion {
+  question: string
+  options: string[]
+  correct_index: number
+  explanation: string
+  source_module_name: string
+  source_page: number | null
+  difficulty: string
+}
+
+export interface QuizResult {
+  id: string
+  questions: MCQuestion[]
+  total_questions: number
 }
 
 export interface ProgressEvent {
   progress: number
   status: DisassemblyTask['status']
+  phase: string
   currentStep?: string
   modules?: DisassemblyModule[]
+  detail?: { completed?: number; total?: number }
+}
+
+export interface AnalysisResult {
+  task: DisassemblyTask
+  modules: DisassemblyModule[]
+  quiz: QuizResult | null
 }
 
 /* ---------- Mock Data ---------- */
 
 const MOCK_MODULES: DisassemblyModule[] = [
-  { id: 'mod-1', name: '图的基本概念与分类', pages: '1-8', examWeight: 'high' },
-  { id: 'mod-2', name: '图的遍历算法 (BFS/DFS)', pages: '9-18', examWeight: 'high' },
-  { id: 'mod-3', name: '连通性与割点', pages: '19-26', examWeight: 'medium' },
-  { id: 'mod-4', name: '最短路径算法', pages: '27-35', examWeight: 'high' },
-  { id: 'mod-5', name: '证明方法与数学归纳法', pages: '36-42', examWeight: 'low' },
+  { id: 'mod-1', name: '图的基本概念与分类', description: null, page_range_start: 1, page_range_end: 8, pages: '1-8', examWeight: 'high', sort_order: 0, has_specialist: true },
+  { id: 'mod-2', name: '图的遍历算法 (BFS/DFS)', description: null, page_range_start: 9, page_range_end: 18, pages: '9-18', examWeight: 'high', sort_order: 1, has_specialist: true },
+  { id: 'mod-3', name: '连通性与割点', description: null, page_range_start: 19, page_range_end: 26, pages: '19-26', examWeight: 'medium', sort_order: 2, has_specialist: true },
+  { id: 'mod-4', name: '最短路径算法', description: null, page_range_start: 27, page_range_end: 35, pages: '27-35', examWeight: 'high', sort_order: 3, has_specialist: true },
+  { id: 'mod-5', name: '证明方法与数学归纳法', description: null, page_range_start: 36, page_range_end: 42, pages: '36-42', examWeight: 'low', sort_order: 4, has_specialist: true },
 ]
+
+const MOCK_QUIZ: QuizResult = {
+  id: 'mock-quiz-1',
+  total_questions: 5,
+  questions: [
+    {
+      question: '在无向图中，所有顶点度数之和与边数的关系是？',
+      options: ['等于边数', '等于边数的2倍', '等于顶点数', '没有确定关系'],
+      correct_index: 1,
+      explanation: '握手定理：无向图中所有顶点度数之和等于边数的 2 倍，因为每条边贡献了 2 个度。',
+      source_module_name: '图的基本概念与分类',
+      source_page: 3,
+      difficulty: 'easy',
+    },
+    {
+      question: 'BFS 遍历图时使用的数据结构是？',
+      options: ['栈 (Stack)', '队列 (Queue)', '优先队列 (Priority Queue)', '链表 (Linked List)'],
+      correct_index: 1,
+      explanation: 'BFS 使用队列来维护待访问节点的顺序，确保按层次（距离递增）遍历。DFS 使用栈。',
+      source_module_name: '图的遍历算法 (BFS/DFS)',
+      source_page: 11,
+      difficulty: 'easy',
+    },
+    {
+      question: '以下哪种情况说明无向图 G 中的顶点 v 是割点？',
+      options: [
+        'v 的度数为图中最大',
+        '删除 v 后图的连通分量数增加',
+        'v 是某条最短路径的端点',
+        'v 在所有生成树中都是叶子节点',
+      ],
+      correct_index: 1,
+      explanation: '割点的定义：删除该顶点（及其关联的边）后，图的连通分量数量增加。这是判断割点的核心条件。',
+      source_module_name: '连通性与割点',
+      source_page: 21,
+      difficulty: 'medium',
+    },
+    {
+      question: 'Dijkstra 算法不适用于以下哪种图？',
+      options: ['稀疏图', '含负权边的图', '含环的图', '有向图'],
+      correct_index: 1,
+      explanation: 'Dijkstra 算法要求所有边权非负。若存在负权边，贪心策略失效。此时应使用 Bellman-Ford 算法。',
+      source_module_name: '最短路径算法',
+      source_page: 29,
+      difficulty: 'medium',
+    },
+    {
+      question: '使用数学归纳法证明命题 P(n) 对所有 n≥1 成立时，归纳步骤需要证明的是？',
+      options: [
+        'P(1) 为真',
+        'P(k) → P(k+1) 对任意 k≥1 成立',
+        'P(n) 对某个特定 n 成立',
+        'P(k) ∧ P(k+1) 同时为真',
+      ],
+      correct_index: 1,
+      explanation: '归纳步骤：假设 P(k) 成立（归纳假设），证明 P(k+1) 也成立。配合基础步骤 P(1) 为真，即可完成证明。',
+      source_module_name: '证明方法与数学归纳法',
+      source_page: 38,
+      difficulty: 'hard',
+    },
+  ],
+}
 
 const MOCK_STEPS = [
   '正在解析文档结构...',
@@ -55,120 +158,32 @@ const MOCK_STEPS = [
   '分析完成，生成报告中...',
 ]
 
-function makeMockSpecialist(mod: DisassemblyModule): string {
-  const templates: Record<string, string> = {
-    'mod-1': `## 图的基本概念与分类
-
-### 核心定义
-
-**定义** 一个图 $G = (V, E)$ 由顶点集 $V$ 和边集 $E$ 组成，其中 $E \\subseteq V \\times V$。
-
-图论是离散数学中最具应用价值的分支之一。它为网络分析、路径规划、资源分配等问题提供了严格的数学框架。
-
-### 图的分类体系
-
-| 类型 | 特征 | 典型应用 |
-|------|------|---------|
-| 无向图 | 边无方向，$(u,v) = (v,u)$ | 社交网络、分子结构 |
-| 有向图 | 边有方向，$(u,v) \\neq (v,u)$ | 网页链接、任务调度 |
-| 加权图 | 边带权重 $w(e)$ | 最短路径、最小生成树 |
-| 多重图 | 允许平行边 | 交通网络建模 |
-
-### 图的表示方法
-
-**邻接矩阵**：空间 $O(n^2)$，适合稠密图，查询 $O(1)$。
-
-**邻接表**：空间 $O(n+m)$，适合稀疏图，遍历邻居高效。
-
-> **考试陷阱**：邻接矩阵对无向图是对称的，但对有向图不一定对称。注意区分入度和出度的计算方式。
-
-### 自测题
-
-1. 一个有 $n$ 个顶点的完全图有多少条边？
-2. 为什么邻接表比邻接矩阵更适合稀疏图？
-3. 如何从邻接矩阵中判断一个图是否为无向图？`,
-
-    'mod-2': `## 图的遍历算法
-
-### BFS（广度优先搜索）
-
-BFS 从源点出发，按距离递增顺序访问所有可达顶点。使用**队列**数据结构。
-
-**算法步骤：**
-1. 将源点入队，标记已访问
-2. 出队顶点 $u$，访问 $u$ 的所有未访问邻居并入队
-3. 重复直到队列为空
-
-**时间复杂度**：$O(V + E)$
-
-**关键性质**：BFS 生成的树是**最短路径树**（对无权图）。
-
-### DFS（深度优先搜索）
-
-DFS 沿一条路径尽可能深地探索，无法继续时回溯。使用**栈**或递归。
-
-**DFS 时间戳定理**：对 DFS 森林中任意两顶点 $u, v$：
-- 若 $u$ 是 $v$ 的祖先，则 $d[u] < d[v] < f[v] < f[u]$
-- 若无祖先关系，则时间区间不相交
-
-### BFS vs DFS 对比
-
-| 维度 | BFS | DFS |
-|------|-----|-----|
-| 数据结构 | 队列 | 栈/递归 |
-| 空间复杂度 | $O(V)$ | $O(V)$ |
-| 最短路径 | 是（无权图） | 否 |
-| 拓扑排序 | 否 | 是 |
-| 连通分量 | 可以 | 可以 |
-
-> **考试陷阱**：DFS 的时间戳区间性质是证明题常考点，务必理解包含关系和不相交关系的含义。`,
-  }
-
-  return templates[mod.id] ?? `## ${mod.name}
-
-### 模块概述
-
-本模块覆盖课件第 ${mod.pages} 页的内容。考试权重：**${mod.examWeight === 'high' ? '高' : mod.examWeight === 'medium' ? '中' : '低'}**。
-
-### 核心知识点
-
-- 本模块包含多个需要深入理解的概念
-- 建议结合例题进行练习
-
-### 重要定理
-
-本节内容涉及的核心定理需要熟练掌握证明过程。
-
-> **学习建议**：先理解定义，再看定理证明，最后做习题验证。
-
-### 自测题
-
-1. 请描述本模块的核心概念。
-2. 列举至少两个实际应用场景。`
-}
-
 /* ---------- API Functions ---------- */
 
 let mockTaskCounter = 0
 
 export async function startDisassembly(
   materialId: string,
-  intent: 'learn' | 'exam',
+  _intent: 'learn' | 'exam',
 ): Promise<{ taskId: string }> {
   if (USE_MOCK) {
     mockTaskCounter++
-    const taskId = `mock-task-${materialId}-${intent}-${mockTaskCounter}`
-    return { taskId }
+    return { taskId: `mock-task-${materialId}-${mockTaskCounter}` }
   }
 
-  const res = await fetch(`${API_BASE}/disassembly/start`, {
+  const res = await authFetch(`${AUTH_API}/disassembly/start`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ materialId, intent }),
+    body: JSON.stringify({ material_id: materialId }),
   })
 
-  if (!res.ok) throw new Error(`Disassembly start failed: ${res.status}`)
-  return res.json() as Promise<{ taskId: string }>
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Start failed' }))
+    throw new Error(err.detail?.detail || err.detail || `Start failed: ${res.status}`)
+  }
+
+  const data = await res.json()
+  return { taskId: data.task_id }
 }
 
 export function subscribeProgress(
@@ -179,22 +194,44 @@ export function subscribeProgress(
     return subscribeMockProgress(taskId, onProgress)
   }
 
+  // Real SSE — uses EventSource to /disassembly/tasks/{taskId}/status
   const evtSource = new EventSource(
-    `${API_BASE}/disassembly/status/${taskId}/stream`,
+    `${AUTH_API}/disassembly/tasks/${taskId}/status`,
   )
 
-  evtSource.onmessage = (e) => {
+  evtSource.addEventListener('status', (e) => {
     try {
-      const data = JSON.parse(e.data) as ProgressEvent
-      onProgress(data)
-      if (data.status === 'completed' || data.status === 'error') {
+      const data = JSON.parse(e.data)
+      onProgress({
+        progress: data.progress,
+        status: data.status,
+        phase: data.phase,
+        currentStep: `${data.phase}: ${data.status}`,
+      })
+      if (data.status === 'completed' || data.status === 'failed' || data.status === 'cancelled') {
         evtSource.close()
       }
-    } catch { /* ignore parse errors */ }
-  }
+    } catch { /* ignore */ }
+  })
+
+  evtSource.addEventListener('progress', (e) => {
+    try {
+      const data = JSON.parse(e.data)
+      onProgress({
+        progress: data.progress,
+        status: data.phase === 'done' ? 'completed' : 'running',
+        phase: data.phase,
+        currentStep: data.message,
+        detail: data.detail,
+      })
+      if (data.phase === 'done') {
+        evtSource.close()
+      }
+    } catch { /* ignore */ }
+  })
 
   evtSource.onerror = () => {
-    onProgress({ progress: 0, status: 'error', currentStep: '连接中断' })
+    onProgress({ progress: 0, status: 'failed', phase: 'unknown', currentStep: '连接中断' })
     evtSource.close()
   }
 
@@ -206,17 +243,21 @@ function subscribeMockProgress(
   onProgress: (event: ProgressEvent) => void,
 ): () => void {
   let step = 0
-  const progressValues = [20, 40, 60, 80, 100]
+  const phases: ProgressEvent['phase'][] = ['parsing', 'cartographer', 'specialist', 'examiner', 'done']
+  const progressValues = [0.15, 0.35, 0.65, 0.90, 1.0]
 
   const id = setInterval(() => {
-    const progress = progressValues[step] ?? 100
+    const progress = progressValues[step] ?? 1.0
+    const phase = phases[step] ?? 'done'
     const isLast = step >= progressValues.length - 1
 
     onProgress({
       progress,
-      status: isLast ? 'completed' : 'processing',
+      status: isLast ? 'completed' : 'running',
+      phase,
       currentStep: MOCK_STEPS[step] ?? '处理中...',
       modules: isLast ? MOCK_MODULES : undefined,
+      detail: phase === 'specialist' ? { completed: 3, total: 5 } : undefined,
     })
 
     step++
@@ -228,26 +269,89 @@ function subscribeMockProgress(
   return () => clearInterval(id)
 }
 
+export async function getAnalysisResult(taskId: string): Promise<AnalysisResult> {
+  if (USE_MOCK) {
+    await new Promise((r) => setTimeout(r, 300))
+    return {
+      task: {
+        task_id: taskId,
+        material_id: 'mock',
+        status: 'completed',
+        phase: 'done',
+        progress: 1.0,
+        attempt: 1,
+        error_message: null,
+        error_phase: null,
+        started_at: null,
+        completed_at: null,
+        created_at: new Date().toISOString(),
+      },
+      modules: MOCK_MODULES,
+      quiz: MOCK_QUIZ,
+    }
+  }
+
+  const res = await authFetch(`${AUTH_API}/disassembly/tasks/${taskId}/result`)
+  if (!res.ok) throw new Error(`Result fetch failed: ${res.status}`)
+  const data = await res.json()
+
+  return {
+    task: data.task,
+    modules: data.modules.map((m: any) => ({
+      ...m,
+      pages: `${m.page_range_start}-${m.page_range_end}`,
+      examWeight: m.exam_weight,
+    })),
+    quiz: data.quiz,
+  }
+}
+
 export async function getSpecialistResult(
-  _taskId: string,
+  taskId: string,
   moduleId: string,
 ): Promise<SpecialistResult> {
   if (USE_MOCK) {
     const mod = MOCK_MODULES.find((m) => m.id === moduleId)
     if (!mod) throw new Error(`Module not found: ${moduleId}`)
-
-    // Simulate network delay
     await new Promise((r) => setTimeout(r, 600))
     return {
       moduleId: mod.id,
       moduleName: mod.name,
-      markdown: makeMockSpecialist(mod),
+      markdown: `## ${mod.name}\n\n模块精讲内容（mock）\n\n> 考试权重：${mod.examWeight}`,
+      summary: null,
+      key_concepts: [],
+      exam_traps: [],
     }
   }
 
-  const res = await fetch(
-    `${API_BASE}/disassembly/result/${_taskId}/module/${moduleId}`,
-  )
-  if (!res.ok) throw new Error(`Specialist result failed: ${res.status}`)
-  return res.json() as Promise<SpecialistResult>
+  const res = await authFetch(`${AUTH_API}/disassembly/tasks/${taskId}/module/${moduleId}`)
+  if (!res.ok) throw new Error(`Module detail failed: ${res.status}`)
+  const data = await res.json()
+
+  return {
+    moduleId: data.id,
+    moduleName: data.name,
+    markdown: data.specialist?.markdown_content ?? '',
+    summary: data.specialist?.summary ?? null,
+    key_concepts: data.specialist?.key_concepts ?? [],
+    exam_traps: data.specialist?.exam_traps ?? [],
+  }
+}
+
+export async function getLatestAnalysis(materialId: string): Promise<DisassemblyTask | null> {
+  if (USE_MOCK) return null
+
+  const res = await authFetch(`${AUTH_API}/disassembly/materials/${materialId}/latest`)
+  if (!res.ok) return null
+  const data = await res.json()
+  return data || null
+}
+
+export async function cancelAnalysis(taskId: string): Promise<void> {
+  if (USE_MOCK) return
+
+  const res = await authFetch(`${AUTH_API}/disassembly/tasks/${taskId}/cancel`, {
+    method: 'POST',
+  })
+  if (!res.ok) throw new Error('Cancel failed')
 }

@@ -102,7 +102,7 @@ export default function HomePage() {
       />
 
       {/* Recent courses + Activity timeline — 70:30 editorial ratio */}
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-10">
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-10 overflow-hidden">
         <RecentCoursesSection />
         <ActivityTimeline />
       </div>
@@ -151,12 +151,12 @@ function WelcomeSection() {
 
 function RecentCoursesSection() {
   return (
-    <motion.section initial="hidden" animate="visible" variants={fadeUp} custom={4}>
+    <motion.section initial="hidden" animate="visible" variants={fadeUp} custom={4} className="min-w-0">
       <div className="flex items-center gap-3 mb-5">
         <div className="w-8 h-[2px] bg-red-primary rounded-full" />
         <h2 className="font-heading text-xl text-text-main">最近学习</h2>
       </div>
-      <div className="flex gap-5 overflow-x-auto pb-2">
+      <div className="flex gap-5 overflow-x-auto pb-2 min-w-0">
         {recentCourses.map((c, i) => (
           <motion.div key={c.id} variants={fadeUp} custom={i + 5} className="shrink-0">
             <Link

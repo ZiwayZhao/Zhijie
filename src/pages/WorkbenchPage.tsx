@@ -10,6 +10,7 @@ import AIToolPanel from '@/components/workbench/AIToolPanel'
 import SocraticChat from '@/components/workbench/SocraticChat'
 import ErrorBoundary from '@/components/ErrorBoundary'
 import { loadProfile } from '@/lib/student-model'
+import type { MCQuestion } from '@/lib/api'
 
 export default function WorkbenchPage() {
   const { id: courseId, mid } = useParams()
@@ -18,6 +19,7 @@ export default function WorkbenchPage() {
   const courseMaterials = courseId ? getMaterialsByCourse(courseId) : []
 
   const [specialistMarkdown, setSpecialistMarkdown] = useState<string | null>(null)
+  const [quizQuestions, setQuizQuestions] = useState<MCQuestion[]>([])
   const [activeTab, setActiveTab] = useState('original')
   const [showSocratic, setShowSocratic] = useState(false)
   const [currentModuleId, setCurrentModuleId] = useState<string | null>(null)
@@ -26,6 +28,10 @@ export default function WorkbenchPage() {
     setSpecialistMarkdown(markdown)
     setActiveTab('specialist')
     setCurrentModuleId(moduleId)
+  }, [])
+
+  const handleQuizReady = useCallback((questions: MCQuestion[]) => {
+    setQuizQuestions(questions)
   }, [])
 
   if (!material || !course) {
@@ -75,6 +81,7 @@ export default function WorkbenchPage() {
           <MaterialReader
             material={material}
             specialistMarkdown={specialistMarkdown}
+            quizQuestions={quizQuestions}
             activeTab={activeTab}
             onTabChange={setActiveTab}
           />
@@ -139,6 +146,7 @@ export default function WorkbenchPage() {
           <AIToolPanel
             materialId={material.id}
             onModuleSelect={handleModuleSelect}
+            onQuizReady={handleQuizReady}
           />
         </ErrorBoundary>
       </motion.aside>

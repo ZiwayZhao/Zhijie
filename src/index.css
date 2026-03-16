@@ -41,9 +41,11 @@ body {
   100% { background-position: -200% 0; }
 }
 
-h1, h2, h3, h4, h5, h6 {
-  font-family: var(--font-heading);
-  color: var(--color-text-main);
+@layer base {
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-heading);
+    color: var(--color-text-main);
+  }
 }
 
 /* Shared form input style — editorial warm feel */

@@ -8,14 +8,15 @@
  */
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { startDisassembly, subscribeProgress, getSpecialistResult } from '@/lib/api'
-import type { DisassemblyModule, ProgressEvent } from '@/lib/api'
+import { startDisassembly, subscribeProgress, getSpecialistResult, getAnalysisResult } from '@/lib/api'
+import type { DisassemblyModule, MCQuestion, ProgressEvent } from '@/lib/api'
 import LearningPlanPreview from '@/components/intent/LearningPlanPreview'
 import type { LearningPlanStep } from '@/components/intent/LearningPlanPreview'
 import { loadProfile } from '@/lib/student-model'
 import { IdlePhase, GatheringPhase } from '@/components/workbench/IntentGatherer'
 import type { Intent, GatheringData } from '@/components/workbench/IntentGatherer'
 import ProcessingView from '@/components/workbench/ProcessingView'
+import type { PipelinePhase } from '@/components/workbench/ProcessingView'
 import { CompletePhase, ErrorPhase, ManualToolSection } from '@/components/workbench/ModuleDisplay'
 
 /* ---------- Types ---------- */
@@ -25,6 +26,7 @@ type Phase = 'idle' | 'gathering' | 'processing' | 'plan-preview' | 'complete' |
 interface AIToolPanelProps {
   materialId: string
   onModuleSelect?: (moduleId: string, markdown: string) => void
+  onQuizReady?: (questions: MCQuestion[]) => void
 }
 
 /* ---------- Plan generation helper ---------- */
@@ -72,12 +74,14 @@ function generatePlanSteps(
 
 /* ---------- Main Component ---------- */
 
-export default function AIToolPanel({ materialId, onModuleSelect }: AIToolPanelProps) {
+export default function AIToolPanel({ materialId, onModuleSelect, onQuizReady }: AIToolPanelProps) {
   const [phase, setPhase] = useState<Phase>('idle')
   const [intent, setIntent] = useState<Intent | null>(null)
   const [gathering, setGathering] = useState<GatheringData>({})
   const [progress, setProgress] = useState(0)
   const [currentStep, setCurrentStep] = useState('')
+  const [pipelinePhase, setPipelinePhase] = useState<PipelinePhase>('init')
+  const [progressDetail, setProgressDetail] = useState<{ completed?: number; total?: number } | undefined>()
   const [modules, setModules] = useState<DisassemblyModule[]>([])
   const [loadingModule, setLoadingModule] = useState<string | null>(null)
   const [errorMsg, setErrorMsg] = useState('')
@@ -106,6 +110,8 @@ export default function AIToolPanel({ materialId, onModuleSelect }: AIToolPanelP
       unsubRef.current = subscribeProgress(taskId, (evt: ProgressEvent) => {
         setProgress(evt.progress)
         if (evt.currentStep) setCurrentStep(evt.currentStep)
+        if (evt.phase) setPipelinePhase(evt.phase as PipelinePhase)
+        if (evt.detail) setProgressDetail(evt.detail)
         if (evt.status === 'completed' && evt.modules) {
           setModules(evt.modules)
           const profile = loadProfile()
@@ -113,7 +119,7 @@ export default function AIToolPanel({ materialId, onModuleSelect }: AIToolPanelP
           setPlanSteps(steps)
           setPhase('plan-preview')
         }
-        if (evt.status === 'error') {
+        if (evt.status === 'failed') {
           setErrorMsg(evt.currentStep ?? '分析过程中出现错误')
           setPhase('error')
         }
@@ -157,9 +163,13 @@ export default function AIToolPanel({ materialId, onModuleSelect }: AIToolPanelP
     setIntent(null)
     setGathering({})
     setProgress(0)
+    setPipelinePhase('init')
+    setProgressDetail(undefined)
     setModules([])
     setErrorMsg('')
-  }, [])
+    // Clear quiz in parent to prevent stale data
+    onQuizReady?.([])
+  }, [onQuizReady])
 
   const handleToolClick = useCallback((toolId: string) => {
     setActiveTool(toolId)
@@ -185,7 +195,14 @@ export default function AIToolPanel({ materialId, onModuleSelect }: AIToolPanelP
           />
         )}
         {phase === 'processing' && (
-          <ProcessingView key="processing" progress={progress} step={currentStep} />
+          <ProcessingView
+            key="processing"
+            phase={pipelinePhase}
+            progress={progress}
+            message={currentStep}
+            detail={progressDetail}
+            error={phase === 'error' ? errorMsg : undefined}
+          />
         )}
         {phase === 'plan-preview' && intent && (
           <motion.div
@@ -199,7 +216,19 @@ export default function AIToolPanel({ materialId, onModuleSelect }: AIToolPanelP
               plan={planSteps}
               intent={intent}
               estimatedMinutes={planSteps.reduce((s, p) => s + p.estimatedMin, 0)}
-              onConfirm={() => setPhase('complete')}
+              onConfirm={() => {
+                setPhase('complete')
+                // Fetch quiz data in background after confirming plan
+                if (taskIdRef.current && onQuizReady) {
+                  getAnalysisResult(taskIdRef.current)
+                    .then((result) => {
+                      if (result.quiz?.questions.length) {
+                        onQuizReady(result.quiz.questions)
+                      }
+                    })
+                    .catch(() => { /* quiz fetch failure is non-blocking */ })
+                }
+              }}
               onCancel={handleReset}
             />
           </motion.div>

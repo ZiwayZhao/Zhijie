@@ -11,14 +11,18 @@ import rehypeKatex from 'rehype-katex'
 import type { Material } from '@/mocks/materials'
 import { materialContent } from '@/mocks/materials'
 import { getCourseById } from '@/mocks/courses'
+import type { MCQuestion } from '@/lib/api'
+import QuizPanel from '@/components/workbench/QuizPanel'
 
 /* ---------- Types ---------- */
 
 interface MaterialReaderProps {
   material: Material
   specialistMarkdown?: string | null
+  quizQuestions?: MCQuestion[]
   activeTab?: string
   onTabChange?: (tab: string) => void
+  onGenerateFlashcards?: () => void
 }
 
 /* ---------- Tabs ---------- */
@@ -48,8 +52,10 @@ function fixMarkdown(md: string): string {
 export default function MaterialReader({
   material,
   specialistMarkdown,
+  quizQuestions,
   activeTab: controlledTab,
   onTabChange,
+  onGenerateFlashcards,
 }: MaterialReaderProps) {
   const [internalTab, setInternalTab] = useState('original')
   const activeTab = controlledTab ?? internalTab
@@ -77,10 +83,11 @@ export default function MaterialReader({
     ? material.fileData
     : materialContent
 
+  const hasQuiz = !!quizQuestions && quizQuestions.length > 0
   const tabs: TabDef[] = [
     { key: 'original', label: '原文', available: true },
     { key: 'specialist', label: 'AI 精讲', available: !!specialistMarkdown },
-    { key: 'exam-points', label: '考点', available: false },
+    { key: 'quiz', label: `自测验${hasQuiz ? ` (${quizQuestions!.length})` : ''}`, available: hasQuiz },
   ]
 
   return (
@@ -111,10 +118,11 @@ export default function MaterialReader({
           </ReactMarkdown>
         </div>
       )}
-      {activeTab === 'exam-points' && (
-        <div className="py-12 text-center text-text-muted text-sm">
-          考点提取功能即将上线
-        </div>
+      {activeTab === 'quiz' && hasQuiz && (
+        <QuizPanel
+          questions={quizQuestions!}
+          onGenerateFlashcards={onGenerateFlashcards}
+        />
       )}
     </motion.article>
   )
