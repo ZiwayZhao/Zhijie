@@ -1,11 +1,11 @@
 import { useState, useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { motion } from 'framer-motion'
+import { motion, type Variants } from 'framer-motion'
 import { Search, BookMarked, Users, TrendingUp } from 'lucide-react'
 import { courses, categories, getCoursesByCategory } from '@/mocks/courses'
 import type { Course } from '@/mocks/courses'
 
-const fadeUp = {
+const fadeUp: Variants = {
   hidden: { opacity: 0, y: 16 },
   visible: (i: number) => ({
     opacity: 1,

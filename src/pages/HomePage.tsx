@@ -1,12 +1,12 @@
 import { Link } from 'react-router-dom'
-import { motion } from 'framer-motion'
+import { motion, type Variants } from 'framer-motion'
 import { Clock, Flame, BookOpen, FileCheck, Upload, PenLine, Award, BookMarked } from 'lucide-react'
 import { recentCourses, activities, studyStats } from '@/mocks/activities'
 import { courses } from '@/mocks/courses'
 import type { Activity } from '@/mocks/activities'
 import type { Course } from '@/mocks/courses'
 
-const fadeUp = {
+const fadeUp: Variants = {
   hidden: { opacity: 0, y: 16 },
   visible: (i: number) => ({
     opacity: 1,
