@@ -21,10 +21,13 @@ import {
 } from 'lucide-react'
 import { startDisassembly, subscribeProgress, getSpecialistResult } from '@/lib/api'
 import type { DisassemblyModule, ProgressEvent } from '@/lib/api'
+import LearningPlanPreview from '@/components/intent/LearningPlanPreview'
+import type { LearningPlanStep } from '@/components/intent/LearningPlanPreview'
+import { loadProfile } from '@/lib/student-model'
 
 /* ---------- Types ---------- */
 
-type Phase = 'idle' | 'gathering' | 'processing' | 'complete' | 'error'
+type Phase = 'idle' | 'gathering' | 'processing' | 'plan-preview' | 'complete' | 'error'
 type Intent = 'learn' | 'exam' | 'review'
 
 interface GatheringData {
@@ -58,6 +61,49 @@ const allTools: Tool[] = [
   { id: 'flashcards', label: '闪卡生成', description: '提取关键知识点生成闪卡', icon: Brain },
 ]
 
+/* ---------- Plan generation helper ---------- */
+
+function generatePlanSteps(
+  modules: DisassemblyModule[],
+  intent: Intent,
+  profile: { modules: Record<string, { mastery: number }> },
+): LearningPlanStep[] {
+  return modules.map((mod, i) => {
+    const mastery = profile.modules[mod.id]?.mastery ?? 0.3
+    const isWeak = mastery < 0.6
+    const isHighWeight = mod.examWeight === 'high'
+
+    let action: LearningPlanStep['action'] = 'read'
+    let priority: LearningPlanStep['priority'] = 'medium'
+    let estimatedMin = 10
+
+    if (intent === 'exam') {
+      action = isWeak ? 'deep-dive' : 'quiz'
+      priority = isHighWeight && isWeak ? 'high' : isHighWeight ? 'medium' : 'low'
+      estimatedMin = isWeak ? 15 : 5
+    } else if (intent === 'review') {
+      action = 'flashcard'
+      priority = mastery < 0.3 ? 'high' : mastery < 0.6 ? 'medium' : 'low'
+      estimatedMin = 5
+    } else {
+      action = i === modules.length - 1 ? 'quiz' : 'read'
+      priority = isHighWeight ? 'high' : 'medium'
+      estimatedMin = 10
+    }
+
+    return {
+      id: `step-${mod.id}`,
+      moduleId: mod.id,
+      moduleName: mod.name,
+      action,
+      estimatedMin,
+      mastery,
+      priority,
+      skippable: mastery > 0.7 || priority === 'low',
+    }
+  })
+}
+
 /* ---------- Main Component ---------- */
 
 export default function AIToolPanel({ materialId, onModuleSelect }: AIToolPanelProps) {
@@ -71,6 +117,7 @@ export default function AIToolPanel({ materialId, onModuleSelect }: AIToolPanelP
   const [errorMsg, setErrorMsg] = useState('')
   const [manualExpanded, setManualExpanded] = useState(false)
   const [activeTool, setActiveTool] = useState<string | null>(null)
+  const [planSteps, setPlanSteps] = useState<LearningPlanStep[]>([])
 
   const taskIdRef = useRef<string | null>(null)
   const unsubRef = useRef<(() => void) | null>(null)
@@ -106,7 +153,11 @@ export default function AIToolPanel({ materialId, onModuleSelect }: AIToolPanelP
         if (evt.currentStep) setCurrentStep(evt.currentStep)
         if (evt.status === 'completed' && evt.modules) {
           setModules(evt.modules)
-          setPhase('complete')
+          // Generate learning plan from modules + student model
+          const profile = loadProfile()
+          const steps = generatePlanSteps(evt.modules, i, profile)
+          setPlanSteps(steps)
+          setPhase('plan-preview')
         }
         if (evt.status === 'error') {
           setErrorMsg(evt.currentStep ?? '分析过程中出现错误')
@@ -171,6 +222,23 @@ export default function AIToolPanel({ materialId, onModuleSelect }: AIToolPanelP
         )}
         {phase === 'processing' && (
           <ProcessingPhase key="processing" progress={progress} step={currentStep} />
+        )}
+        {phase === 'plan-preview' && intent && (
+          <motion.div
+            key="plan-preview"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.25 }}
+          >
+            <LearningPlanPreview
+              plan={planSteps}
+              intent={intent}
+              estimatedMinutes={planSteps.reduce((s, p) => s + p.estimatedMin, 0)}
+              onConfirm={() => setPhase('complete')}
+              onCancel={handleReset}
+            />
+          </motion.div>
         )}
         {phase === 'complete' && (
           <CompletePhase

@@ -15,6 +15,15 @@ import {
   saveDeck,
 } from '@/lib/fsrs'
 import FlashcardCard from '@/components/flashcard/FlashcardCard'
+import {
+  loadProfile,
+  saveProfile,
+  processFeedback,
+  getMasteryLevel,
+  getMasteryLabel,
+  getMasteryColor,
+} from '@/lib/student-model'
+import type { LearningProfile } from '@/lib/student-model'
 
 /* ------------------------------------------------------------------ */
 /*  Types & Props                                                      */
@@ -26,10 +35,18 @@ interface ReviewSessionProps {
   onComplete: () => void
 }
 
+interface MasteryChange {
+  moduleId: string
+  moduleName: string
+  before: number
+  after: number
+}
+
 interface SessionStats {
   total: number
   ratings: Record<1 | 2 | 3 | 4, number>
   totalTimeMs: number
+  masteryChanges: MasteryChange[]
 }
 
 const RATINGS: Array<1 | 2 | 3 | 4> = [
@@ -126,6 +143,37 @@ function CompletionScreen({ stats, onClose }: { stats: SessionStats; onClose: ()
         />
       </div>
 
+      {/* Mastery changes */}
+      {stats.masteryChanges.length > 0 && (
+        <div className="mb-8 text-left">
+          <h3 className="font-heading text-base text-text-main mb-3">知识掌握度变化</h3>
+          <div className="space-y-2">
+            {stats.masteryChanges.map((change) => {
+              const level = getMasteryLevel(change.after)
+              const color = getMasteryColor(level)
+              const diff = change.after - change.before
+              const arrow = diff > 0 ? '↑' : '↓'
+              return (
+                <div key={change.moduleId} className="flex items-center justify-between border border-border-warm rounded px-3 py-2">
+                  <span className="text-sm text-text-body">{change.moduleName}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-text-muted">
+                      {Math.round(change.before * 100)}%
+                    </span>
+                    <span style={{ color }} className="text-sm font-medium">
+                      {arrow} {Math.round(change.after * 100)}%
+                    </span>
+                    <span className="text-xs px-1.5 py-0.5 rounded border" style={{ borderColor: `${color}40`, color }}>
+                      {getMasteryLabel(level)}
+                    </span>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       <button
         onClick={onClose}
         className="px-6 py-2.5 rounded border border-red-primary text-red-primary font-body hover:bg-red-primary hover:text-white transition-colors"
@@ -170,7 +218,27 @@ export default function ReviewSession({ deck, dueCards, onComplete }: ReviewSess
     total: dueCards.length,
     ratings: { 1: 0, 2: 0, 3: 0, 4: 0 },
     totalTimeMs: 0,
+    masteryChanges: [],
   })
+
+  // BKT profile tracking
+  const profileRef = useRef<LearningProfile>(loadProfile())
+  const masterySnapshotRef = useRef<Record<string, number>>({})
+
+  // Capture initial mastery snapshot on mount
+  useEffect(() => {
+    const profile = profileRef.current
+    const snapshot: Record<string, number> = {}
+    for (const card of dueCards) {
+      const note = deck.notes.find((n) => n.id === card.noteId)
+      if (note?.sourceRef.moduleId) {
+        const mod = profile.modules[note.sourceRef.moduleId]
+        if (mod) snapshot[note.sourceRef.moduleId] = mod.mastery
+        else snapshot[note.sourceRef.moduleId] = 0.3 // default BKT pL0
+      }
+    }
+    masterySnapshotRef.current = snapshot
+  }, [dueCards, deck.notes])
 
   // Timer for current card
   const cardStartTime = useRef(Date.now())
@@ -226,6 +294,19 @@ export default function ReviewSession({ deck, dueCards, onComplete }: ReviewSess
       // Save to localStorage
       saveDeck(deck)
 
+      // BKT feedback: update student model
+      const note = deck.notes.find((n) => n.id === currentCard.noteId)
+      if (note?.sourceRef.moduleId) {
+        profileRef.current = processFeedback(profileRef.current, {
+          type: 'flashcard-rating',
+          moduleId: note.sourceRef.moduleId,
+          courseId: deck.courseId,
+          rating,
+          moduleName: note.sourceRef.moduleId,
+        })
+        saveProfile(profileRef.current)
+      }
+
       // Update stats
       setStats((prev) => ({
         ...prev,
@@ -235,6 +316,21 @@ export default function ReviewSession({ deck, dueCards, onComplete }: ReviewSess
 
       // Next card or complete
       if (currentIdx + 1 >= dueCards.length) {
+        // Calculate mastery changes
+        const changes: MasteryChange[] = []
+        const profile = profileRef.current
+        for (const [modId, beforeVal] of Object.entries(masterySnapshotRef.current)) {
+          const afterVal = profile.modules[modId]?.mastery ?? beforeVal
+          if (Math.abs(afterVal - beforeVal) > 0.001) {
+            changes.push({
+              moduleId: modId,
+              moduleName: profile.modules[modId]?.moduleName ?? modId,
+              before: beforeVal,
+              after: afterVal,
+            })
+          }
+        }
+        setStats((prev) => ({ ...prev, masteryChanges: changes }))
         setCompleted(true)
       } else {
         setIsFlipped(false)
