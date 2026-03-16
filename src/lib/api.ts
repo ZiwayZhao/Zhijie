@@ -37,6 +37,9 @@ export interface CourseItem {
   slug: string
   school: string
   description: string
+  platformDescription: string
+  learningObjectives: string[] | null
+  targetAudience: string | null
   tags: string[]
   materialCount: number
   studentCount: number
@@ -50,6 +53,11 @@ export interface CourseItem {
   prerequisites: string | null
   websiteUrl: string | null
   videoUrl: string | null
+  sourcePlatform: string
+  level: string | null
+  semester: string | null
+  department: string | null
+  imageUrl: string | null
 }
 
 export interface CategoryItem {
@@ -66,7 +74,11 @@ function mapCourse(raw: any): CourseItem {
     name: raw.name,
     slug: raw.slug,
     school: raw.university || '',
-    description: raw.description || '',
+    // Prefer curated platform_description; fall back to raw description
+    description: raw.platform_description || raw.description || '',
+    platformDescription: raw.platform_description || '',
+    learningObjectives: raw.learning_objectives ?? null,
+    targetAudience: raw.target_audience ?? null,
     tags: raw.tags || [],
     materialCount: raw.material_count ?? 0,
     studentCount: raw.student_count ?? 0,
@@ -80,6 +92,11 @@ function mapCourse(raw: any): CourseItem {
     prerequisites: raw.prerequisites,
     websiteUrl: raw.website_url,
     videoUrl: raw.video_url,
+    sourcePlatform: raw.source_platform || 'csdiy',
+    level: raw.level ?? null,
+    semester: raw.semester ?? null,
+    department: raw.department ?? null,
+    imageUrl: raw.image_url ?? null,
   }
 }
 

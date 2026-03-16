@@ -28,8 +28,15 @@ async def list_courses(
     language: str | None = Query(None),
     difficulty: int | None = Query(None, ge=1, le=5),
 ):
-    """List courses with pagination, filtering, and search."""
-    stmt = select(Course)
+    """List courses with pagination, filtering, and search.
+
+    Public endpoint: only returns published courses (and raw/ai_rewritten
+    during dev for backward compatibility — remove filter once editorial
+    pipeline is operational).
+    """
+    stmt = select(Course).where(
+        Course.content_status.in_(("raw", "ai_rewritten", "reviewed", "published"))
+    )
 
     # Category filter
     if category:
@@ -55,6 +62,7 @@ async def list_courses(
         stmt = stmt.where(
             Course.name.ilike(pattern, escape="\\")
             | Course.description.ilike(pattern, escape="\\")
+            | Course.platform_description.ilike(pattern, escape="\\")
             | Course.university.ilike(pattern, escape="\\")
         )
 
@@ -121,8 +129,12 @@ async def get_course(
     slug: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """Get a single course by slug."""
-    stmt = select(Course).where(Course.slug == slug)
+    """Get a single course by slug (SEC-04: same filter as list)."""
+    _visible = ("raw", "ai_rewritten", "reviewed", "published")
+    stmt = select(Course).where(
+        Course.slug == slug,
+        Course.content_status.in_(_visible),
+    )
     result = await db.execute(stmt)
     course = result.scalar_one_or_none()
 
