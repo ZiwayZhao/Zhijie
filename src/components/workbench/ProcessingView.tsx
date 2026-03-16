@@ -167,7 +167,6 @@ export default function ProcessingView({
   error,
 }: ProcessingViewProps) {
   const hasError = !!error
-  const currentIdx = getPhaseIndex(phase)
 
   return (
     <motion.div

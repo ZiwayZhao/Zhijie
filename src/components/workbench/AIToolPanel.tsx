@@ -201,7 +201,7 @@ export default function AIToolPanel({ materialId, onModuleSelect, onQuizReady }:
             progress={progress}
             message={currentStep}
             detail={progressDetail}
-            error={phase === 'error' ? errorMsg : undefined}
+            error={undefined}
           />
         )}
         {phase === 'plan-preview' && intent && (

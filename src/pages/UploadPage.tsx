@@ -8,38 +8,15 @@ import type { UploadFile } from '@/components/upload/FileList'
 import ClassifyForm from '@/components/upload/ClassifyForm'
 import type { ClassifyData } from '@/components/upload/ClassifyForm'
 import UploadProgress from '@/components/upload/UploadProgress'
-import { addMaterial } from '@/mocks/materials'
+import { requestUpload, uploadFileToS3, confirmUpload } from '@/lib/api'
 
-type UploadStatus = 'idle' | 'uploading' | 'done'
-
-/** Read file as base64 (PDF/images) or text (md/txt/docx) */
-function readFileContent(file: File): Promise<string> {
-  return new Promise((resolve) => {
-    const reader = new FileReader()
-    if (file.type === 'application/pdf' || file.type.startsWith('image/')) {
-      reader.onload = (e) => {
-        const result = e.target?.result as string
-        // Strip data URL prefix, keep base64
-        resolve(result.split(',')[1] ?? result)
-      }
-      reader.readAsDataURL(file)
-    } else {
-      reader.onload = (e) => resolve(e.target?.result as string)
-      reader.readAsText(file)
-    }
-  })
-}
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
+type UploadStatus = 'idle' | 'uploading' | 'done' | 'error'
 
 export default function UploadPage() {
   const [files, setFiles] = useState<UploadFile[]>([])
   const [status, setStatus] = useState<UploadStatus>('idle')
   const [progress, setProgress] = useState(0)
+  const [errorMsg, setErrorMsg] = useState('')
   const counterRef = useRef(0)
   const classifyRef = useRef<ClassifyData | null>(null)
   const navigate = useNavigate()
@@ -56,43 +33,47 @@ export default function UploadPage() {
     setFiles((prev) => prev.filter((f) => f.id !== id))
   }, [])
 
-  function handleSubmit(data: ClassifyData) {
+  async function handleSubmit(data: ClassifyData) {
     classifyRef.current = data
     setStatus('uploading')
     setProgress(0)
+    setErrorMsg('')
 
-    // Mock upload — animate to 100% then complete
-    const start = performance.now()
-    const duration = 1800 // 1.8 seconds
-    const animate = () => {
-      const elapsed = performance.now() - start
-      const pct = Math.min(Math.round((elapsed / duration) * 100), 100)
-      setProgress(pct)
-      if (pct < 100) {
-        requestAnimationFrame(animate)
-      } else {
-        saveMaterials(data)
-        setStatus('done')
+    try {
+      const total = files.length
+      for (let i = 0; i < total; i++) {
+        const f = files[i]
+        const pctBase = Math.round((i / total) * 100)
+        setProgress(pctBase)
+
+        // Step 1: Request presigned URL
+        const { materialId, uploadUrl } = await requestUpload({
+          filename: f.file.name,
+          contentType: f.file.type || 'application/pdf',
+          fileSize: f.file.size,
+          title: f.file.name.replace(/\.[^.]+$/, ''),
+          materialType: data.materialType || 'pdf',
+          semester: data.semester,
+          courseId: data.courseId || undefined,
+        })
+
+        setProgress(pctBase + Math.round((1 / total) * 40))
+
+        // Step 2: Upload file to S3
+        await uploadFileToS3(uploadUrl, f.file)
+
+        setProgress(pctBase + Math.round((1 / total) * 80))
+
+        // Step 3: Confirm upload
+        await confirmUpload(materialId)
+
+        setProgress(Math.round(((i + 1) / total) * 100))
       }
-    }
-    requestAnimationFrame(animate)
-  }
 
-  async function saveMaterials(data: ClassifyData) {
-    const now = new Date().toISOString().slice(0, 10)
-    for (const f of files) {
-      const fileData = await readFileContent(f.file)
-      addMaterial({
-        id: `user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        courseId: data.courseId,
-        name: f.file.name.replace(/\.[^.]+$/, ''),
-        type: data.materialType as '课件' | '习题' | '笔记' | '考题',
-        uploader: '我',
-        uploadTime: now,
-        fileSize: formatFileSize(f.file.size),
-        fileType: f.file.type,
-        fileData,
-      })
+      setStatus('done')
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : '上传失败，请重试')
+      setStatus('error')
     }
   }
 
@@ -107,7 +88,6 @@ export default function UploadPage() {
 
   return (
     <div className="max-w-[720px] mx-auto px-6 py-8 lg:py-10">
-      {/* Editorial page header */}
       <motion.header
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
@@ -122,55 +102,60 @@ export default function UploadPage() {
         </div>
         <h1 className="font-heading text-3xl text-text-main">上传学习材料</h1>
         <p className="text-sm text-text-muted mt-2 leading-relaxed">
-          上传课件、习题、笔记或考题，AI 将自动为你归类
+          上传课件、习题、笔记或考题，通过 S3 存储并自动触发 AI 分析
         </p>
       </motion.header>
 
       <div className="space-y-6">
-        {/* Drop zone */}
-        {status === 'idle' && <DropZone onFiles={handleFiles} />}
+        {(status === 'idle' || status === 'error') && <DropZone onFiles={handleFiles} />}
 
-        {/* File list */}
-        {status === 'idle' && <FileList files={files} onRemove={handleRemove} />}
+        {(status === 'idle' || status === 'error') && <FileList files={files} onRemove={handleRemove} />}
 
-        {/* Classify form — show when files added and not yet submitting */}
-        {files.length > 0 && status === 'idle' && (
+        {status === 'error' && errorMsg && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="p-3 border border-red-primary/20 bg-red-primary/5 rounded-md text-sm text-red-primary"
+          >
+            {errorMsg}
+          </motion.div>
+        )}
+
+        {files.length > 0 && (status === 'idle' || status === 'error') && (
           <ClassifyForm fileCount={files.length} onSubmit={handleSubmit} />
         )}
 
-        {/* Upload progress */}
-        {status !== 'idle' && (
-          <UploadProgress
-            status={status === 'done' ? 'done' : 'uploading'}
-            progress={progress}
-          />
+        {status === 'uploading' && (
+          <UploadProgress status="uploading" progress={progress} />
         )}
 
-        {/* After upload done */}
         {status === 'done' && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.3 }}
-            className="flex items-center justify-center gap-4 pt-2"
-          >
-            <button
-              onClick={handleGoToCourse}
-              className="px-5 py-2.5 rounded-sm bg-red-primary text-white text-sm font-medium hover:bg-red-dark transition-colors"
+          <>
+            <UploadProgress status="done" progress={100} />
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.3 }}
+              className="flex items-center justify-center gap-4 pt-2"
             >
-              查看课程材料
-            </button>
-            <button
-              onClick={() => {
-                setFiles([])
-                setStatus('idle')
-                setProgress(0)
-              }}
-              className="text-sm text-text-muted hover:text-red-primary transition-colors"
-            >
-              继续上传
-            </button>
-          </motion.div>
+              <button
+                onClick={handleGoToCourse}
+                className="px-5 py-2.5 rounded-sm bg-red-primary text-white text-sm font-medium hover:bg-red-dark transition-colors"
+              >
+                查看课程材料
+              </button>
+              <button
+                onClick={() => {
+                  setFiles([])
+                  setStatus('idle')
+                  setProgress(0)
+                }}
+                className="text-sm text-text-muted hover:text-red-primary transition-colors"
+              >
+                继续上传
+              </button>
+            </motion.div>
+          </>
         )}
       </div>
     </div>

@@ -2,13 +2,11 @@
  * AgendaTimeline — detailed agenda view for the dedicated /agenda page.
  * Groups items by urgency and shows exam countdowns.
  */
-import { motion } from 'framer-motion'
-import type { DailyAgenda, ExamConfig, AgendaItem as AgendaItemType } from '@/lib/agenda-engine'
+import type { DailyAgenda, AgendaItem as AgendaItemType } from '@/lib/agenda-engine'
 import AgendaItem from '@/components/agenda/AgendaItem'
 
 interface AgendaTimelineProps {
   agenda: DailyAgenda
-  examConfigs: ExamConfig[]
   onToggleComplete: (id: string) => void
   /** When true, exam-prep items are filtered out (shown separately outside) */
   hideExamPrep?: boolean
@@ -45,7 +43,7 @@ function SectionHeader({ title, count }: { title: string; count: number }) {
   )
 }
 
-export default function AgendaTimeline({ agenda, examConfigs, onToggleComplete, hideExamPrep }: AgendaTimelineProps) {
+export default function AgendaTimeline({ agenda, onToggleComplete, hideExamPrep }: AgendaTimelineProps) {
   const filteredItems = hideExamPrep
     ? agenda.items.filter((item) => item.type !== 'exam-prep')
     : agenda.items

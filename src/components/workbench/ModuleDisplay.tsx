@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   BookOpen,
   Target,
-  RefreshCw,
+
   Network,
   MessageCircleQuestion,
   ListChecks,

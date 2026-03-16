@@ -83,7 +83,7 @@ const fullTemplates: ResponseTemplate[] = [
 
 const moderateTemplates: ResponseTemplate[] = [
   {
-    content: (msg, mod) =>
+    content: (msg, _mod) =>
       `关于"${msg.slice(0, 20)}"，你能想到哪些相关的概念？它们之间有什么联系？\n\n试着画一个简单的关系图——哪些概念是前提，哪些是推论？`,
     hasReveal: true,
   },

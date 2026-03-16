@@ -47,11 +47,13 @@ def create_app() -> FastAPI:
     from app.api.v1.oauth import router as oauth_router
     from app.api.v1.materials import router as materials_router
     from app.api.v1.disassembly import router as disassembly_router
+    from app.api.v1.courses import router as courses_router
     app.include_router(health_router, prefix=settings.api_v1_prefix)
     app.include_router(auth_router, prefix=settings.api_v1_prefix)
     app.include_router(oauth_router, prefix=settings.api_v1_prefix)
     app.include_router(materials_router, prefix=settings.api_v1_prefix)
     app.include_router(disassembly_router, prefix=settings.api_v1_prefix)
+    app.include_router(courses_router, prefix=settings.api_v1_prefix)
 
     return app
 

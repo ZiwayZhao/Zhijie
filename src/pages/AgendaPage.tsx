@@ -10,9 +10,9 @@ import {
   ChevronRight,
   CalendarDays,
   Plus,
-  Clock,
+
 } from 'lucide-react'
-import { format, addDays, subDays, startOfWeek, endOfWeek, isSameDay, isToday } from 'date-fns'
+import { format, addDays, subDays, startOfWeek, isSameDay, isToday } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
 import type { DailyAgenda, ExamConfig, TodoItem } from '@/lib/agenda-engine'
 import { generateDailyAgenda, loadExamConfigs, loadTodos, saveTodos } from '@/lib/agenda-engine'
@@ -227,7 +227,6 @@ export default function AgendaPage() {
       <motion.div variants={fadeUp} custom={3} initial="hidden" animate="visible">
         <AgendaTimeline
           agenda={agenda}
-          examConfigs={examConfigs}
           onToggleComplete={handleToggleComplete}
           hideExamPrep
         />

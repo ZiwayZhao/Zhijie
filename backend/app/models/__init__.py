@@ -8,3 +8,4 @@ from app.models.disassembly import (  # noqa: F401
     SpecialistOutput,
     QuizData,
 )
+from app.models.course import CourseCategory, Course  # noqa: F401
