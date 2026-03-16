@@ -1,0 +1,800 @@
+截至 `2026-03-16`，Anthropic 官方公开文档列出的 Sonnet 型号为 `claude-sonnet-4-20250514`，未查到公开的 “Claude Sonnet 4.6”；下面方案按可核实的 `Claude Sonnet 4` 设计。
+
+---
+
+**一、整体架构**
+
+```text
+React Upload UI
+  -> FastAPI /uploads
+  -> PostgreSQL 写入 document/job
+  -> 文件落盘 S3/本地卷
+  -> ARQ enqueue(document_pipeline)
+
+ARQ Worker
+  1. parse_pdf_job
+  2. cartographer_job
+  3. specialist_job(module_i) 并发
+  4. examiner_job(module_i) 并发
+  5. finalize_job
+
+每一步:
+  -> 更新 PostgreSQL 状态
+  -> publish Redis channel: progress:{document_id}
+  -> FastAPI SSE 订阅 Redis 并转发前端
+```
+
+建议目录：
+
+```text
+app/
+  api/
+  core/
+  db/
+  models/
+  schemas/
+  services/
+    pdf/
+    llm/
+    pipeline/
+    progress/
+  workers/
+  prompts/
+```
+
+---
+
+**二、PDF解析选型**
+
+| 方案 | 优点 | 缺点 | 结论 |
+|---|---|---|---|
+| `pymupdf4llm` | 原生输出 Markdown/JSON；保留布局信息；对标题、列表、代码块友好；适合直接喂 LLM | 表格精度一般；扫描件仍需 OCR | `主选` |
+| `pdfplumber` | 基于字符级对象，表格提取和页面几何调试强 | 需要自己重建 Markdown 结构；速度和工程复杂度较高 | `辅选` |
+| `PyPDF2` | 轻量、纯 Python、适合拆分合并元数据 | 官方文档已提示 `PyPDF2 is deprecated, please use pypdf`；文本抽取能力弱，不适合教学课件结构化 | `不选` |
+
+落地建议：
+
+- 默认先用 `pymupdf4llm.to_markdown()` 获取全量 Markdown。
+- 同时保留 `to_json()` 结果，保存 bbox、page、block 级结构，供 Agent 1 判断章节边界。
+- 如果检测到“表格密度高”或 `markdown/table` 缺失，则对对应页面调用 `pdfplumber.extract_tables()` 补强。
+- 扫描 PDF 单独走 OCR 分支，不要指望 PyPDF2/pdfplumber 自动救活。
+
+判定规则：
+
+- 文本字数/页 < 30 且图片对象多：判定疑似扫描件
+- 出现连续多页仅图片：切 OCR
+- 出现课程目录/章节号/大标题字号差异：优先由 `pymupdf4llm + JSON layout` 划分模块
+
+---
+
+**三、任务队列选型：ARQ vs Celery vs Dramatiq**
+
+| 方案 | 优点 | 缺点 | 适配度 |
+|---|---|---|---|
+| `ARQ` | 原生 `asyncio`；Redis 即可；和 FastAPI 协作最顺；轻量；重试简单 | 生态不如 Celery 大；复杂工作流需自己编排 | `最优` |
+| `Celery` | 最成熟；生态最大；工作流能力强 | 配置更重；异步体验不如 ARQ 直接；对当前场景偏重 | 可用但过度 |
+| `Dramatiq` | API 简洁；中等复杂度项目好用 | Python async 体验不如 ARQ 原生；对 FastAPI async 组合不如 ARQ 顺手 | 次优 |
+
+结论：
+
+- 你的链路是 `FastAPI + Redis + Claude API + SSE`，本质上是 IO 密集型异步任务，`ARQ` 最契合。
+- 采用“1 个文档编排任务 + N 个模块任务”的 fan-out/fan-in 模式即可，不需要 Celery Canvas 的复杂度。
+
+---
+
+**四、核心流水线设计**
+
+**状态机**
+
+`uploaded -> parsing -> cartography_done -> specialist_running -> examiner_running -> completed`
+失败状态分两层：
+
+- 文档级：`failed`
+- 模块级：`partial_failed`
+
+**任务编排**
+
+1. `parse_pdf_job(document_id)`
+2. `cartographer_job(document_id, parsed_markdown, parsed_layout_json)`
+3. `specialist_job(document_id, module_id)` 并发
+4. `examiner_job(document_id, module_id)` 在对应 specialist 完成后触发
+5. `finalize_job(document_id)`
+
+**并发规则**
+
+- Cartographer 串行
+- Specialist 按模块并发，建议并发数 `3-5`
+- Examiner 按模块并发，建议并发数 `5-8`
+- 每模块独立事务，失败不影响其它模块
+
+---
+
+**五、进度推送：Redis Pub/Sub -> SSE**
+
+Redis channel 规范：
+
+- `progress:{document_id}`
+
+事件格式：
+
+```json
+{
+  "event": "module.completed",
+  "document_id": "doc_123",
+  "job_id": "job_456",
+  "stage": "specialist",
+  "module_id": "mod_03",
+  "progress_percent": 58,
+  "message": "模块3精讲已完成",
+  "ts": "2026-03-16T10:15:30Z"
+}
+```
+
+SSE 端点：
+
+`GET /api/v1/documents/{document_id}/events`
+
+前端监听事件：
+
+- `document.status_changed`
+- `module.started`
+- `module.completed`
+- `module.failed`
+- `quiz.completed`
+- `document.completed`
+
+进度计算建议：
+
+- PDF解析 10%
+- Cartographer 15%
+- Specialist 45%
+- Examiner 25%
+- 汇总入库 5%
+
+---
+
+**六、LLM调用规范**
+
+实现建议：
+
+- 模型：`claude-sonnet-4-20250514`
+- 接口：Anthropic Messages API
+- 输出：优先使用你要求的 `Structured Outputs(JSON Schema)`
+- 兼容回退：若当前账号/区域未开通该能力，则 `JSON mode + 本地 jsonschema 校验 + 自动重试`
+
+调用策略：
+
+- Agent 1 输入全课件压缩文本
+- Agent 2 输入“模块原文 + 模块计划 + 课程上下文摘要”
+- Agent 3 输入“模块精讲 Markdown + 难点标签 + 陷阱点”
+
+工程上必须加：
+
+- `temperature` 低值：`0.1-0.3`
+- `max_tokens` 分 Agent 单独限制
+- schema 校验失败自动重试
+- 语义校验：题目答案必须能在精讲里定位依据
+
+---
+
+**七、3 个 Agent 的 Prompt 模板与 JSON Schema**
+
+### Agent 1: Cartographer
+
+**System Prompt**
+
+```text
+你是大学课件结构分析专家。你的任务不是讲解内容，而是把课件切分成适合学习的“模块”。
+必须依据页面结构、标题层级、主题连续性、公式/图表密度、知识依赖关系进行切分。
+输出必须是 JSON，严格符合 schema。
+禁止编造 PDF 中不存在的章节。
+如果内容跨页连续，必须合并为同一模块。
+每个模块必须给出页码范围、标题、摘要、先修依赖、预计学习时长、难度、是否包含公式/图表/定义/例题。
+```
+
+**User Prompt 模板**
+
+```text
+课程名: {{course_name}}
+文件名: {{file_name}}
+总页数: {{page_count}}
+
+请基于以下 PDF 解析结果生成模块拆分计划。
+
+[全文 Markdown]
+{{document_markdown}}
+
+[页面布局摘要 JSON]
+{{layout_summary_json}}
+
+输出要求：
+1. 模块数量控制在 5-15 个
+2. 每个模块内容应主题完整
+3. 单模块尽量控制在 3-8 页
+4. 若存在“绪论/复习/附录”，单独识别
+5. 给出整体课程地图
+```
+
+**输出 Schema**
+
+```json
+{
+  "type": "object",
+  "required": ["course_title", "document_summary", "modules"],
+  "properties": {
+    "course_title": { "type": "string" },
+    "document_summary": { "type": "string" },
+    "modules": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "module_id", "title", "summary", "page_start", "page_end",
+          "difficulty", "estimated_minutes", "prerequisites",
+          "contains_formula", "contains_diagram", "contains_examples",
+          "learning_objectives", "risk_flags"
+        ],
+        "properties": {
+          "module_id": { "type": "string" },
+          "title": { "type": "string" },
+          "summary": { "type": "string" },
+          "page_start": { "type": "integer" },
+          "page_end": { "type": "integer" },
+          "difficulty": { "type": "string", "enum": ["easy", "medium", "hard"] },
+          "estimated_minutes": { "type": "integer" },
+          "prerequisites": { "type": "array", "items": { "type": "string" } },
+          "contains_formula": { "type": "boolean" },
+          "contains_diagram": { "type": "boolean" },
+          "contains_examples": { "type": "boolean" },
+          "learning_objectives": { "type": "array", "items": { "type": "string" } },
+          "risk_flags": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    }
+  }
+}
+```
+
+---
+
+### Agent 2: Specialist
+
+**System Prompt**
+
+```text
+你是大学课程精讲教师。你将把一个模块原始课件改写为高质量中文教学讲义。
+必须做到：
+1. 保留关键术语
+2. 数学内容使用 LaTeX
+3. 增加“考试陷阱提醒”
+4. 明确概念、推导、例题、易错点、记忆法
+5. 不得超出原文事实，不要捏造定理或例子
+输出必须是 JSON，严格符合 schema。
+```
+
+**User Prompt 模板**
+
+```text
+课程名: {{course_name}}
+模块标题: {{module_title}}
+页码: {{page_start}}-{{page_end}}
+模块摘要: {{module_summary}}
+先修依赖: {{prerequisites}}
+
+[模块原文]
+{{module_markdown}}
+
+请生成可直接渲染的精讲内容。
+要求：
+1. content_markdown 使用标准 Markdown
+2. 公式写成 LaTeX
+3. 必须包含：核心概念、关键公式、推导思路、案例/例题、考试陷阱、易错点
+4. 若原文没有例题，可生成“微型示例”，但必须标记为“示意例”
+5. 不要输出多余文本
+```
+
+**输出 Schema**
+
+```json
+{
+  "type": "object",
+  "required": [
+    "module_id", "title", "content_markdown", "key_concepts",
+    "key_formulas", "exam_traps", "common_mistakes",
+    "source_coverage", "needs_human_review"
+  ],
+  "properties": {
+    "module_id": { "type": "string" },
+    "title": { "type": "string" },
+    "content_markdown": { "type": "string" },
+    "key_concepts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["term", "explanation"],
+        "properties": {
+          "term": { "type": "string" },
+          "explanation": { "type": "string" }
+        }
+      }
+    },
+    "key_formulas": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "latex", "meaning"],
+        "properties": {
+          "name": { "type": "string" },
+          "latex": { "type": "string" },
+          "meaning": { "type": "string" }
+        }
+      }
+    },
+    "exam_traps": { "type": "array", "items": { "type": "string" } },
+    "common_mistakes": { "type": "array", "items": { "type": "string" } },
+    "source_coverage": {
+      "type": "string",
+      "enum": ["high", "medium", "low"]
+    },
+    "needs_human_review": { "type": "boolean" }
+  }
+}
+```
+
+---
+
+### Agent 3: Examiner
+
+**System Prompt**
+
+```text
+你是大学课程命题老师。请只根据给定精讲内容出题。
+题型仅限单选或多选 MCQ。
+每题必须有：题干、选项、正确答案、解析、考查点、难度。
+不得出现精讲中没有依据的知识点。
+题目应覆盖概念理解、公式应用、易错点、考试陷阱。
+输出必须是 JSON，严格符合 schema。
+```
+
+**User Prompt 模板**
+
+```text
+课程名: {{course_name}}
+模块标题: {{module_title}}
+
+[精讲内容]
+{{content_markdown}}
+
+[考试陷阱]
+{{exam_traps}}
+
+请生成 8-12 道结构化 MCQ。
+要求：
+1. 至少 30% 题目覆盖陷阱/易错点
+2. 题目难度分布为 easy:medium:hard ≈ 2:5:3
+3. 解析必须说明为什么正确、为什么错误
+4. 所有答案必须可从精讲内容中追溯
+```
+
+**输出 Schema**
+
+```json
+{
+  "type": "object",
+  "required": ["module_id", "quiz_title", "questions"],
+  "properties": {
+    "module_id": { "type": "string" },
+    "quiz_title": { "type": "string" },
+    "questions": {
+      "type": "array",
+      "minItems": 8,
+      "maxItems": 12,
+      "items": {
+        "type": "object",
+        "required": [
+          "question_id", "type", "stem", "options",
+          "correct_answers", "explanation", "difficulty", "skill_tag"
+        ],
+        "properties": {
+          "question_id": { "type": "string" },
+          "type": { "type": "string", "enum": ["single", "multiple"] },
+          "stem": { "type": "string" },
+          "options": {
+            "type": "array",
+            "minItems": 4,
+            "maxItems": 6,
+            "items": {
+              "type": "object",
+              "required": ["key", "text"],
+              "properties": {
+                "key": { "type": "string" },
+                "text": { "type": "string" }
+              }
+            }
+          },
+          "correct_answers": { "type": "array", "items": { "type": "string" } },
+          "explanation": { "type": "string" },
+          "difficulty": { "type": "string", "enum": ["easy", "medium", "hard"] },
+          "skill_tag": { "type": "string" }
+        }
+      }
+    }
+  }
+}
+```
+
+---
+
+**八、错误处理与重试**
+
+原则：
+
+- 单模块失败不影响整份课件完成
+- 模块状态独立记录
+- 文档结果允许 `completed_with_errors`
+
+重试策略：
+
+- `429 / 5xx / timeout / schema_validation_error`：自动重试
+- 指数退避：`30s -> 120s -> 300s`
+- 最大重试：
+  - Cartographer：`2`
+  - Specialist：`3`
+  - Examiner：`3`
+
+失败隔离：
+
+- `specialist_job(mod_03)` 失败，只标记该模块 `failed`
+- `examiner_job(mod_03)` 不执行，状态标记 `blocked_by_specialist_failure`
+- 其它模块照常执行
+- 汇总页展示“9/10 模块完成，1 模块失败，可人工重跑”
+
+额外校验：
+
+- page range 不得重叠错乱
+- Specialist 输出长度过短则判 `quality_failure`
+- Examiner 若答案不在选项中，直接重试
+- 每道题必须至少引用一个 `skill_tag`
+
+---
+
+**九、PostgreSQL 表设计**
+
+```sql
+documents(
+  id uuid pk,
+  course_name text,
+  file_name text,
+  file_path text,
+  page_count int,
+  status text,
+  progress_percent int,
+  parse_engine text,
+  llm_model text,
+  created_at timestamptz,
+  updated_at timestamptz,
+  completed_at timestamptz null
+)
+
+pipeline_jobs(
+  id uuid pk,
+  document_id uuid fk,
+  stage text,
+  status text,
+  retry_count int,
+  error_code text null,
+  error_message text null,
+  started_at timestamptz null,
+  finished_at timestamptz null
+)
+
+document_pages(
+  id bigserial pk,
+  document_id uuid fk,
+  page_no int,
+  markdown_text text,
+  layout_json jsonb,
+  extracted_tables jsonb,
+  ocr_used boolean default false
+)
+
+modules(
+  id uuid pk,
+  document_id uuid fk,
+  module_no int,
+  title text,
+  summary text,
+  page_start int,
+  page_end int,
+  difficulty text,
+  estimated_minutes int,
+  prerequisites jsonb,
+  learning_objectives jsonb,
+  risk_flags jsonb,
+  status text,
+  created_at timestamptz
+)
+
+module_lessons(
+  id uuid pk,
+  module_id uuid fk,
+  content_markdown text,
+  key_concepts jsonb,
+  key_formulas jsonb,
+  exam_traps jsonb,
+  common_mistakes jsonb,
+  source_coverage text,
+  needs_human_review boolean,
+  status text,
+  error_message text null,
+  updated_at timestamptz
+)
+
+module_quizzes(
+  id uuid pk,
+  module_id uuid fk,
+  quiz_title text,
+  status text,
+  updated_at timestamptz
+)
+
+quiz_questions(
+  id uuid pk,
+  quiz_id uuid fk,
+  question_no int,
+  type text,
+  stem text,
+  options jsonb,
+  correct_answers jsonb,
+  explanation text,
+  difficulty text,
+  skill_tag text
+)
+
+progress_events(
+  id bigserial pk,
+  document_id uuid fk,
+  event_type text,
+  stage text,
+  module_id uuid null,
+  payload jsonb,
+  created_at timestamptz
+)
+```
+
+索引：
+
+- `documents(status, created_at desc)`
+- `modules(document_id, module_no)`
+- `pipeline_jobs(document_id, stage)`
+- `progress_events(document_id, created_at desc)`
+
+---
+
+**十、API 端点列表**
+
+```text
+POST   /api/v1/documents/upload
+GET    /api/v1/documents/{document_id}
+GET    /api/v1/documents/{document_id}/events
+POST   /api/v1/documents/{document_id}/retry
+POST   /api/v1/documents/{document_id}/cancel
+
+GET    /api/v1/documents/{document_id}/modules
+GET    /api/v1/modules/{module_id}
+POST   /api/v1/modules/{module_id}/retry-specialist
+POST   /api/v1/modules/{module_id}/retry-examiner
+
+GET    /api/v1/modules/{module_id}/lesson
+GET    /api/v1/modules/{module_id}/quiz
+GET    /api/v1/modules/{module_id}/quiz/questions
+
+GET    /api/v1/documents/{document_id}/export/markdown
+GET    /api/v1/documents/{document_id}/export/json
+```
+
+关键返回：
+
+- `/upload` 返回 `document_id`
+- `/events` 返回 `text/event-stream`
+- `/documents/{id}` 返回聚合状态、整体进度、模块统计
+
+---
+
+**十一、前端实现**
+
+页面分三块：
+
+- 上传区：拖拽 PDF、课程名输入、开始分析
+- 实时进度区：阶段进度条 + 模块列表 + 失败重试按钮
+- 结果区：模块导航、Markdown 渲染、题目渲染
+
+React 组件建议：
+
+```text
+<DocumentUpload />
+<PipelineProgress />
+<ModuleList />
+<LessonViewer />
+<QuizViewer />
+```
+
+关键实现点：
+
+- 上传后拿到 `document_id`
+- 立即建立 `EventSource(/events)`
+- 收到 SSE 后更新 zustand/redux store
+- Lesson 用 `react-markdown + rehype-katex`
+- Quiz 用可折叠卡片展示题干、选项、答案、解析
+
+前端状态字段：
+
+```ts
+type DocumentState = {
+  documentId: string
+  status: string
+  progressPercent: number
+  currentStage: string
+  modules: Array<{
+    moduleId: string
+    title: string
+    status: string
+    progressPercent: number
+  }>
+}
+```
+
+---
+
+**十二、Docker Compose**
+
+```yaml
+version: "3.9"
+
+services:
+  api:
+    build: ./backend
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    env_file: .env
+    depends_on:
+      - redis
+      - postgres
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./storage:/app/storage
+
+  worker:
+    build: ./backend
+    command: arq app.workers.settings.WorkerSettings
+    env_file: .env
+    depends_on:
+      - redis
+      - postgres
+    volumes:
+      - ./storage:/app/storage
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: aistudy
+      POSTGRES_USER: aistudy
+      POSTGRES_PASSWORD: aistudy
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  frontend:
+    build: ./frontend
+    command: npm run dev -- --host 0.0.0.0
+    ports:
+      - "5173:5173"
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
+```
+
+`.env` 至少包括：
+
+```text
+DATABASE_URL=postgresql+asyncpg://aistudy:aistudy@postgres:5432/aistudy
+REDIS_URL=redis://redis:6379/0
+ANTHROPIC_API_KEY=...
+ANTHROPIC_MODEL=claude-sonnet-4-20250514
+STORAGE_ROOT=/app/storage
+```
+
+---
+
+**十三、50页课件成本预估**
+
+这里必须说明：这是 `推算`，不是官方定额。官方可核实的是 `Claude Sonnet 4` 价格：输入 `$3/MTok`，输出 `$15/MTok`。
+
+按一份 50 页大学课件，较平衡估算：
+
+- Cartographer：输入 `35k`，输出 `2k`
+- Specialist 总计：输入 `45k`，输出 `22k`
+- Examiner 总计：输入 `18k`，输出 `6k`
+
+合计：
+
+- 输入约 `98k tokens`
+- 输出约 `30k tokens`
+
+费用：
+
+- 输入：`0.098 * $3 = $0.294`
+- 输出：`0.030 * $15 = $0.45`
+- 总计：约 **`$0.74 / 份`**
+
+区间建议：
+
+- 轻量课件：`$0.45 - $0.60`
+- 常规课件：`$0.70 - $0.95`
+- 公式密集/精讲更长：`$1.00 - $1.40`
+
+如果用 Anthropic Message Batches，官方文档写明异步批处理有 `50%` 折扣，则 Specialist/Examiner 可进一步压到约 **`$0.35 - $0.70 / 份`**，但延迟会更高。
+
+---
+
+**十四、最小可实现版本**
+
+MVP 建议只做这 6 件事：
+
+1. `pymupdf4llm` 抽全文 Markdown + JSON
+2. `ARQ` 跑 4 类 job
+3. `Cartographer -> Specialist -> Examiner` 三段串并混合
+4. `Redis Pub/Sub + SSE`
+5. PostgreSQL 持久化模块、讲义、测验
+6. React 渲染 Markdown 与 MCQ
+
+这样 2 周内可以做出可用版本；再补：
+
+- OCR
+- pdfplumber 表格补强
+- 批处理降成本
+- 人工审核台
+- 题目质量回归评测
+
+---
+
+**十五、我建议的最终技术栈**
+
+- PDF：`pymupdf4llm + pdfplumber(补表格)`
+- API：`FastAPI`
+- Queue：`ARQ`
+- Cache/Event：`Redis`
+- DB：`PostgreSQL`
+- ORM：`SQLAlchemy 2.0 + asyncpg`
+- 前端：`React + Vite + react-markdown + rehype-katex`
+- LLM：`Anthropic Claude Sonnet 4`
+- 部署：`Docker Compose`，后续再上 K8s
+
+如果你需要，我下一步可以直接继续给你：
+1. `FastAPI + ARQ` 的项目骨架代码  
+2. 三个 Agent 的 Python 调用实现  
+3. 完整数据库 `SQLAlchemy` 模型和迁移脚本
+
+**参考来源**
+- PyMuPDF4LLM 文档：https://pymupdf.readthedocs.io/en/latest/pymupdf4llm/
+- pdfplumber 项目：https://github.com/jsvine/pdfplumber
+- PyPDF2 文档（已提示 deprecated）：https://pypdf2.readthedocs.io/
+- ARQ 文档：https://arq-docs.helpmanual.io/
+- Celery 文档：https://docs.celeryq.dev/en/stable/getting-started/
+- Dramatiq 文档：https://dramatiq.io/guide.html
+- Anthropic Models：https://docs.anthropic.com/en/docs/about-claude/models
+- Anthropic Pricing：https://docs.anthropic.com/en/docs/about-claude/pricing
+- Anthropic Messages API：https://docs.anthropic.com/en/api/messages
+- Anthropic Beta headers：https://docs.anthropic.com/en/api/beta-headers
+- Anthropic Message Batches：https://docs.anthropic.com/en/api/creating-message-batches
+
+其中“Structured Outputs(JSON Schema)”的具体接入方式，我是基于 Anthropic 的 `beta headers` 机制和当前公开文档做的实现推断；如果你要上线，我建议先用你账户实际调用确认该能力是否已对当前模型开放。

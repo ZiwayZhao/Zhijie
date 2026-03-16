@@ -1,0 +1,800 @@
+  - 消息状态标记为 `interrupted`
+
+**九、降级策略：Sonnet 4.5 -> Haiku 4.5**
+
+建议降级触发条件：
+
+- Sonnet 超时
+- 429 / overload
+- 非关键场景且延迟预算紧张
+- 学生低价值闲聊或摘要任务
+
+路由策略：
+
+- 主对话：`claude-sonnet-4-5`
+- 摘要压缩：`claude-haiku-4-5`
+- Sonnet 异常重试 1 次后切 Haiku
+- 若切 Haiku，需要降低响应上限，避免风格漂移
+
+伪代码：
+
+```python
+async def generate_with_fallback(req: ClaudeRequest):
+    try:
+        return await anthropic_stream(model="claude-sonnet-4-5", req=req)
+    except RetryableAnthropicError:
+        return await anthropic_stream(model="claude-haiku-4-5", req=req)
+```
+
+**十、PostgreSQL 表设计**
+
+```sql
+CREATE TABLE users (
+  id UUID PRIMARY KEY,
+  email TEXT UNIQUE,
+  name TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE courses (
+  id UUID PRIMARY KEY,
+  code TEXT UNIQUE NOT NULL,
+  name TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE lessons (
+  id UUID PRIMARY KEY,
+  course_id UUID NOT NULL REFERENCES courses(id),
+  title TEXT NOT NULL,
+  topic TEXT,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE conversations (
+  id UUID PRIMARY KEY,
+  user_id UUID NOT NULL REFERENCES users(id),
+  course_id UUID REFERENCES courses(id),
+  lesson_id UUID REFERENCES lessons(id),
+  title TEXT,
+  mastery NUMERIC(4,3) NOT NULL DEFAULT 0.500,
+  assessment_mode BOOLEAN NOT NULL DEFAULT FALSE,
+  latest_summary_id UUID,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE messages (
+  id UUID PRIMARY KEY,
+  conversation_id UUID NOT NULL REFERENCES conversations(id),
+  role TEXT NOT NULL CHECK (role IN ('system','user','assistant','tool')),
+  content TEXT NOT NULL,
+  content_json JSONB,
+  seq INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'completed',
+  response_id UUID,
+  model TEXT,
+  input_tokens INTEGER,
+  output_tokens INTEGER,
+  latency_ms INTEGER,
+  interrupted BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX idx_messages_conv_seq
+ON messages(conversation_id, seq);
+
+CREATE TABLE conversation_summaries (
+  id UUID PRIMARY KEY,
+  conversation_id UUID NOT NULL REFERENCES conversations(id),
+  start_seq INTEGER NOT NULL,
+  end_seq INTEGER NOT NULL,
+  summary_text TEXT NOT NULL,
+  summary_json JSONB NOT NULL,
+  model TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE mastery_snapshots (
+  id UUID PRIMARY KEY,
+  conversation_id UUID NOT NULL REFERENCES conversations(id),
+  message_id UUID REFERENCES messages(id),
+  mastery_before NUMERIC(4,3) NOT NULL,
+  mastery_after NUMERIC(4,3) NOT NULL,
+  signal_json JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE feedback_events (
+  id UUID PRIMARY KEY,
+  conversation_id UUID NOT NULL REFERENCES conversations(id),
+  message_id UUID REFERENCES messages(id),
+  user_id UUID NOT NULL REFERENCES users(id),
+  rating SMALLINT NOT NULL CHECK (rating IN (-1, 1)),
+  reason TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE model_usage_logs (
+  id UUID PRIMARY KEY,
+  conversation_id UUID REFERENCES conversations(id),
+  response_id UUID,
+  model TEXT NOT NULL,
+  request_type TEXT NOT NULL,
+  input_tokens INTEGER NOT NULL,
+  output_tokens INTEGER NOT NULL,
+  cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+  cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+  cost_usd NUMERIC(12,6),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+```
+
+**十一、1000 MAU 成本预估**
+
+先给一组务实假设：
+
+- `1000 MAU`
+- 每人每月 `12` 次学习会话
+- 每次 `8` 轮
+- 每轮平均：
+  - 输入 `1800` tokens
+  - 输出 `280` tokens
+- 90% 主对话用 Sonnet 4.5
+- 10% 走 Haiku 4.5 或摘要任务
+- 未计入图片、多模态、工具调用
+- 未计入长上下文 premium rate
+- 若启用 prompt caching，实际还可更低
+
+月 token 量：
+
+- 总轮数：`1000 * 12 * 8 = 96,000`
+- 输入：`96,000 * 1,800 = 172.8M`
+- 输出：`96,000 * 280 = 26.88M`
+
+若全部 Sonnet 4.5：
+
+- 输入成本：`172.8 * $3 = $518.4`
+- 输出成本：`26.88 * $15 = $403.2`
+- 合计：`$921.6 / 月`
+
+若 90% Sonnet + 10% Haiku：
+
+- Sonnet 部分：约 `$829.4`
+- Haiku 部分：输入 `17.28M * $1 = $17.28`，输出 `2.688M * $5 = $13.44`
+- 合计：约 `$860.1 / 月`
+
+建议给业务侧报三档：
+
+| 档位 | 假设 | 估算月成本 |
+|---|---|---|
+| 低 | 8 次会话/月，6 轮/次，1500 in / 220 out | `$350-$450` |
+| 中 | 12 次会话/月，8 轮/次，1800 in / 280 out | `$860-$930` |
+| 高 | 20 次会话/月，10 轮/次，2200 in / 350 out | `$2200-$2400` |
+
+降本手段：
+
+- 摘要压缩用 Haiku
+- system prompt + lesson context 用 prompt caching
+- recent window 严格控长
+- assistant 输出限制在 `150~350 tokens`
+- 对“闲聊/重复追问”启用短回复模板
+
+**十二、后端代码结构**
+
+```text
+backend/
+  app/
+    main.py
+    api/
+      deps.py
+      routes/
+        chat.py
+        conversations.py
+    core/
+      config.py
+      logging.py
+    db/
+      base.py
+      session.py
+      models.py
+      repositories/
+        conversations.py
+        messages.py
+        summaries.py
+        mastery.py
+    schemas/
+      chat.py
+      conversation.py
+    services/
+      anthropic_client.py
+      dialogue_orchestrator.py
+      prompt_builder.py
+      memory_manager.py
+      mastery_engine.py
+      interrupt_registry.py
+      summarizer.py
+      usage_meter.py
+    utils/
+      sse.py
+      token_estimator.py
+      ids.py
+  requirements.txt
+```
+
+---
+
+## 关键后端代码
+
+### 1. `app/core/config.py`
+
+```python
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    app_name: str = "Socratic Dialogue Engine"
+    debug: bool = False
+
+    database_url: str
+    anthropic_api_key: str
+
+    anthropic_primary_model: str = "claude-sonnet-4-5"
+    anthropic_fallback_model: str = "claude-haiku-4-5"
+    summary_model: str = "claude-haiku-4-5"
+
+    recent_message_window: int = 12
+    soft_context_token_limit: int = 8000
+    summary_trigger_message_count: int = 20
+    stream_max_tokens: int = 512
+
+
+settings = Settings()
+```
+
+### 2. `app/schemas/chat.py`
+
+```python
+from pydantic import BaseModel, Field
+from typing import Optional
+from uuid import UUID
+
+
+class ChatStreamRequest(BaseModel):
+    conversation_id: UUID
+    user_message: str = Field(min_length=1)
+    course_name: Optional[str] = None
+    lesson_name: Optional[str] = None
+    assessment_mode: bool = False
+
+
+class InterruptRequest(BaseModel):
+    conversation_id: UUID
+    response_id: UUID
+```
+
+### 3. `app/services/mastery_engine.py`
+
+```python
+from dataclasses import dataclass
+from typing import Literal
+
+
+@dataclass
+class SocraticPolicy:
+    mode: Literal["guided", "balanced", "question_only"]
+    hint_budget: int
+    max_questions_per_turn: int
+    allow_direct_answer: bool
+    require_student_attempt_first: bool
+
+
+def policy_from_mastery(mastery: float) -> SocraticPolicy:
+    if mastery < 0.3:
+        return SocraticPolicy("guided", 3, 1, False, False)
+    if mastery <= 0.7:
+        return SocraticPolicy("balanced", 2, 1, False, True)
+    return SocraticPolicy("question_only", 0, 2, False, True)
+
+
+def update_mastery(
+    current: float,
+    answer_quality: float,
+    needed_hints: int,
+    correctness: float,
+) -> float:
+    delta = 0.15 * answer_quality + 0.15 * correctness - 0.08 * needed_hints
+    next_value = max(0.0, min(1.0, current + delta))
+    return round(next_value, 3)
+```
+
+### 4. `app/services/prompt_builder.py`
+
+```python
+from app.services.mastery_engine import SocraticPolicy
+
+
+SYSTEM_PROMPT_TEMPLATE = """
+你是“智阶导师”，一名面向中国大学生的 AI 苏格拉底式学习导师。
+你的任务不是直接给答案，而是通过提问、提示、纠错和结构化引导，帮助学生自己理解并完成推理。
+
+课程：{course_name}
+主题：{lesson_name}
+学生背景：{student_profile}
+mastery：{mastery}
+教学模式：{policy_mode}
+assessment_mode：{assessment_mode}
+已掌握：{known_concepts}
+薄弱点：{weak_concepts}
+近期误区：{recent_misconceptions}
+
+规则：
+1. 优先提问，不直接给答案。
+2. 每次只推进一个关键认知步骤。
+3. 输出短，优先“一个问题 + 一个提示”。
+4. assessment_mode=true 时，不给可直接提交的答案。
+5. 学生答错时，指出值得重想的局部，不直接判死刑。
+6. 学生要求直接答案时，拒绝代做，并转成分步提示。
+
+掌握度策略：
+- guided: 强提示、小步拆解、脚手架式引导
+- balanced: 先问后提示，逐层推进
+- question_only: 纯提问，强调解释、证明、迁移
+
+当前模式要求：
+- mode={policy_mode}
+- hint_budget={hint_budget}
+- max_questions_per_turn={max_questions_per_turn}
+- allow_direct_answer={allow_direct_answer}
+- require_student_attempt_first={require_student_attempt_first}
+"""
+
+
+def build_system_prompt(
+    *,
+    course_name: str,
+    lesson_name: str,
+    student_profile: str,
+    mastery: float,
+    policy: SocraticPolicy,
+    assessment_mode: bool,
+    known_concepts: str,
+    weak_concepts: str,
+    recent_misconceptions: str,
+) -> str:
+    return SYSTEM_PROMPT_TEMPLATE.format(
+        course_name=course_name or "未指定课程",
+        lesson_name=lesson_name or "未指定主题",
+        student_profile=student_profile or "普通本科生",
+        mastery=mastery,
+        policy_mode=policy.mode,
+        assessment_mode=assessment_mode,
+        known_concepts=known_concepts or "暂无",
+        weak_concepts=weak_concepts or "暂无",
+        recent_misconceptions=recent_misconceptions or "暂无",
+        hint_budget=policy.hint_budget,
+        max_questions_per_turn=policy.max_questions_per_turn,
+        allow_direct_answer=str(policy.allow_direct_answer).lower(),
+        require_student_attempt_first=str(policy.require_student_attempt_first).lower(),
+    )
+```
+
+### 5. `app/services/memory_manager.py`
+
+```python
+from typing import List, Dict, Any
+
+
+class MemoryManager:
+    def __init__(self, recent_window: int = 12):
+        self.recent_window = recent_window
+
+    def build_context(
+        self,
+        recent_messages: List[Dict[str, str]],
+        latest_summary: dict | None,
+    ) -> list[dict[str, Any]]:
+        context: list[dict[str, Any]] = []
+
+        if latest_summary:
+            context.append({
+                "role": "user",
+                "content": f"[历史摘要]\n{latest_summary['summary_text']}"
+            })
+
+        context.extend(recent_messages[-self.recent_window:])
+        return context
+
+    def should_summarize(self, total_messages: int, estimated_tokens: int) -> bool:
+        return total_messages > 20 or estimated_tokens > 8000
+```
+
+### 6. `app/services/anthropic_client.py`
+
+```python
+import anthropic
+from anthropic import AsyncAnthropic
+from app.core.config import settings
+
+
+class AnthropicService:
+    def __init__(self) -> None:
+        self.client = AsyncAnthropic(api_key=settings.anthropic_api_key)
+
+    async def stream_messages(self, *, model: str, system: str, messages: list, max_tokens: int = 512):
+        return self.client.messages.stream(
+            model=model,
+            system=system,
+            messages=messages,
+            max_tokens=max_tokens,
+        )
+
+    async def create_summary(self, *, text: str) -> str:
+        msg = await self.client.messages.create(
+            model=settings.summary_model,
+            max_tokens=400,
+            system="你是教学对话摘要器。输出简洁、结构化中文摘要。",
+            messages=[{"role": "user", "content": text}],
+        )
+        return "".join(
+            block.text for block in msg.content if getattr(block, "type", None) == "text"
+        )
+```
+
+### 7. `app/services/interrupt_registry.py`
+
+```python
+import asyncio
+from uuid import UUID
+
+
+class InterruptRegistry:
+    def __init__(self):
+        self._tasks: dict[str, asyncio.Task] = set()
+        self._cancelled: set[str] = set()
+
+    def register(self, response_id: UUID, task: asyncio.Task) -> None:
+        self._tasks[str(response_id)] = task
+
+    def unregister(self, response_id: UUID) -> None:
+        self._tasks.pop(str(response_id), None)
+        self._cancelled.discard(str(response_id))
+
+    def cancel(self, response_id: UUID) -> bool:
+        key = str(response_id)
+        self._cancelled.add(key)
+        task = self._tasks.get(key)
+        if task and not task.done():
+            task.cancel()
+            return True
+        return False
+
+    def is_cancelled(self, response_id: UUID) -> bool:
+        return str(response_id) in self._cancelled
+
+
+interrupt_registry = InterruptRegistry()
+```
+
+### 8. `app/utils/sse.py`
+
+```python
+import json
+
+
+def sse_event(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+```
+
+### 9. `app/services/dialogue_orchestrator.py`
+
+```python
+import asyncio
+from uuid import uuid4
+from fastapi import Request
+from fastapi.responses import StreamingResponse
+
+from app.core.config import settings
+from app.services.anthropic_client import AnthropicService
+from app.services.interrupt_registry import interrupt_registry
+from app.services.mastery_engine import policy_from_mastery
+from app.services.prompt_builder import build_system_prompt
+from app.services.memory_manager import MemoryManager
+from app.utils.sse import sse_event
+
+
+class DialogueOrchestrator:
+    def __init__(self):
+        self.anthropic = AnthropicService()
+        self.memory = MemoryManager(settings.recent_message_window)
+
+    async def stream_chat(
+        self,
+        request: Request,
+        conversation: dict,
+        user_message: str,
+        recent_messages: list[dict],
+        latest_summary: dict | None,
+    ) -> StreamingResponse:
+        response_id = uuid4()
+        mastery = float(conversation["mastery"])
+        policy = policy_from_mastery(mastery)
+
+        system_prompt = build_system_prompt(
+            course_name=conversation.get("course_name", ""),
+            lesson_name=conversation.get("lesson_name", ""),
+            student_profile=conversation.get("student_profile", "普通本科生"),
+            mastery=mastery,
+            policy=policy,
+            assessment_mode=conversation.get("assessment_mode", False),
+            known_concepts=conversation.get("known_concepts", ""),
+            weak_concepts=conversation.get("weak_concepts", ""),
+            recent_misconceptions=conversation.get("recent_misconceptions", ""),
+        )
+
+        messages = self.memory.build_context(recent_messages, latest_summary)
+        messages.append({"role": "user", "content": user_message})
+
+        async def event_generator():
+            current_model = settings.anthropic_primary_model
+            partial_text = ""
+
+            yield sse_event("session.started", {
+                "response_id": str(response_id),
+                "model": current_model,
+            })
+
+            try:
+                stream_cm = await self.anthropic.stream_messages(
+                    model=current_model,
+                    system=system_prompt,
+                    messages=messages,
+                    max_tokens=settings.stream_max_tokens,
+                )
+
+                async with stream_cm as stream:
+                    async for text in stream.text_stream:
+                        if await request.is_disconnected() or interrupt_registry.is_cancelled(response_id):
+                            yield sse_event("interrupted", {"reason": "client_abort"})
+                            return
+
+                        partial_text += text
+                        yield sse_event("delta", {"text": text})
+
+                    final = await stream.get_final_message()
+                    yield sse_event("usage", {
+                        "input_tokens": final.usage.input_tokens,
+                        "output_tokens": final.usage.output_tokens,
+                    })
+                    yield sse_event("done", {"response_id": str(response_id)})
+
+            except Exception:
+                if current_model != settings.anthropic_fallback_model:
+                    yield sse_event("error", {
+                        "code": "primary_failed",
+                        "message": "fallback_to_haiku"
+                    })
+                raise
+
+        task = asyncio.current_task()
+        if task:
+            interrupt_registry.register(response_id, task)
+
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+```
+
+### 10. `app/api/routes/chat.py`
+
+```python
+from uuid import UUID
+from fastapi import APIRouter, Request, HTTPException
+
+from app.schemas.chat import ChatStreamRequest, InterruptRequest
+from app.services.dialogue_orchestrator import DialogueOrchestrator
+from app.services.interrupt_registry import interrupt_registry
+
+router = APIRouter(prefix="/api/v1/chat", tags=["chat"])
+orchestrator = DialogueOrchestrator()
+
+
+@router.post("/stream")
+async def stream_chat(payload: ChatStreamRequest, request: Request):
+    conversation = {
+        "id": str(payload.conversation_id),
+        "mastery": 0.52,
+        "course_name": payload.course_name or "高等数学",
+        "lesson_name": payload.lesson_name or "导数应用",
+        "student_profile": "中国大学生",
+        "assessment_mode": payload.assessment_mode,
+        "known_concepts": "导数定义",
+        "weak_concepts": "极值判定",
+        "recent_misconceptions": "把驻点和极值点等同",
+    }
+    recent_messages = []
+    latest_summary = None
+
+    return await orchestrator.stream_chat(
+        request=request,
+        conversation=conversation,
+        user_message=payload.user_message,
+        recent_messages=recent_messages,
+        latest_summary=latest_summary,
+    )
+
+
+@router.post("/interrupt")
+async def interrupt_chat(payload: InterruptRequest):
+    ok = interrupt_registry.cancel(payload.response_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="response not active")
+    return {"ok": True}
+```
+
+### 11. `app/main.py`
+
+```python
+from fastapi import FastAPI
+from app.api.routes.chat import router as chat_router
+
+app = FastAPI(title="Socratic Dialogue Engine")
+app.include_router(chat_router)
+```
+
+**十三、前端实现要点**
+
+组件拆分：
+
+```text
+src/
+  features/chat/
+    ChatPage.tsx
+    ChatWindow.tsx
+    MessageList.tsx
+    Composer.tsx
+    useSSEChat.ts
+    sseParser.ts
+```
+
+`useSSEChat.ts` 核心思路：
+
+- 用 `fetch` 发起 `POST`
+- 用 `ReadableStream` 逐块读取
+- 解析 SSE 帧
+- `AbortController` 支持停止
+- 新提问前先打断旧响应
+
+示例：
+
+```tsx
+import { useRef, useState } from "react";
+
+export function useSSEChat() {
+  const abortRef = useRef<AbortController | null>(null);
+  const [streaming, setStreaming] = useState(false);
+
+  async function sendMessage(payload: any, handlers: {
+    onDelta: (text: string) => void;
+    onDone: () => void;
+    onStarted: (meta: any) => void;
+    onError: (err: any) => void;
+  }) {
+    abortRef.current?.abort();
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setStreaming(true);
+
+    try {
+      const res = await fetch("/api/v1/chat/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder("utf-8");
+      let buffer = "";
+
+      while (reader) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const frames = buffer.split("\n\n");
+        buffer = frames.pop() || "";
+
+        for (const frame of frames) {
+          const eventMatch = frame.match(/event:\s*(.+)/);
+          const dataMatch = frame.match(/data:\s*(.+)/);
+          if (!eventMatch || !dataMatch) continue;
+
+          const event = eventMatch[1].trim();
+          const data = JSON.parse(dataMatch[1]);
+
+          if (event === "session.started") handlers.onStarted(data);
+          if (event === "delta") handlers.onDelta(data.text);
+          if (event === "done") handlers.onDone();
+          if (event === "error") handlers.onError(data);
+        }
+      }
+    } catch (e) {
+      if ((e as Error).name !== "AbortError") handlers.onError(e);
+    } finally {
+      setStreaming(false);
+    }
+  }
+
+  function interrupt() {
+    abortRef.current?.abort();
+  }
+
+  return { sendMessage, interrupt, streaming };
+}
+```
+
+Framer Motion 用法建议：
+
+- assistant token 流入时做轻量 fade-in
+- 新问题提交后让“思考中”占位卡片淡入
+- 打断时让当前 assistant 气泡收束并标记“已中断”
+- 不要把每个 token 都做复杂动画，性能会抖
+
+**十四、生产级补充建议**
+
+- 鉴权：JWT / session cookie
+- 限流：按 user_id + IP
+- 观测：Prometheus + OpenTelemetry + Sentry
+- 安全：输入审核、越权 prompt 注入检测、作业代做拦截
+- A/B 实验：
+  - 问题密度
+  - 提示层数
+  - mastery 更新公式
+  - Sonnet/Haiku 路由阈值
+- 教学质量评估指标：
+  - 学生后续独立答对率
+  - 每轮平均提示数
+  - 直接要答案率
+  - 点赞/点踩
+  - 会话完成率
+  - 学习迁移题表现
+
+**十五、推荐的最小可上线版本**
+
+如果你要先做 MVP，我建议第一版只做这些：
+
+- 单轮流式对话
+- mastery 三档策略
+- 滑动窗口 + 单摘要
+- Sonnet 主力 + Haiku 摘要
+- 中断
+- 点赞/点踩
+- usage 成本记录
+
+这样 2~4 周就能做出一版可测产品。
+
+**资料来源**
+
+- Anthropic Sonnet 4.5 发布与 API 模型名：https://www.anthropic.com/news/claude-sonnet-4-5
+- Anthropic 模型概览与 Sonnet 4 价格表：https://docs.anthropic.com/en/docs/models-overview
+- Anthropic Haiku 4.5 价格与可用性：https://www.anthropic.com/claude/haiku
+- Anthropic Streaming Messages（SSE）：https://docs.anthropic.com/en/docs/build-with-claude/streaming
+- Khanmigo 社区指南，“引导、提示、问题而非代做”：https://support.khanacademy.org/hc/en-us/articles/13860282793869-What-are-the-Community-Guidelines-for-Khanmigo
+- Khanmigo 反馈标准，“不应直接给答案”：https://support.khanacademy.org/hc/en-us/articles/13983335341069-How-do-I-leave-feedback-about-Khanmigo
+- Khanmigo Testing Mode，测验时禁用辅助：https://blog.khanacademy.org/announcing-khanmigo-testing-mode/
+
+如果你要，我下一步可以继续给你两样东西之一：
+
+1. 直接补一套可运行的 FastAPI 项目骨架  
+2. 把上面的数据库和服务层补成完整 `SQLAlchemy + Alembic + asyncpg` 实现

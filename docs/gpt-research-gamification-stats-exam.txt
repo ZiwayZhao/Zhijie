@@ -1,0 +1,800 @@
+/bin/zsh -lc "sed -n '1,220p' src/components/agenda/ExamCountdown.tsx" in /Users/ziway/Downloads/工程项目/智阶新版 succeeded in 0ms:
+/**
+ * Student Model — BKT knowledge tracing + learning profile.
+ * Tracks per-module mastery, processes feedback signals,
+ * and provides scaffold level for Socratic dialogue.
+ */
+
+/* ------------------------------------------------------------------ */
+/*  Types                                                              */
+/* ------------------------------------------------------------------ */
+
+export interface ModuleMastery {
+  moduleId: string
+  moduleName: string
+  courseId: string
+  mastery: number // 0-1 probability of mastery
+  lastUpdated: number
+  totalAttempts: number
+  correctAttempts: number
+}
+
+ succeeded in 0ms:
+/**
+ * ReviewSession — core FSRS-driven review flow.
+ * Shows cards one by one, collects ratings, tracks time, shows completion stats.
+ * Editorial academic design: journal-style progress, elegant rating controls.
+ */
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
+import type { FlashcardCard as FCard, FlashcardDeck } from '@/lib/fsrs'
+import {
+  getSchedulingChoices,
+  formatInterval,
+  reviewCard,
+  Rating,
+  saveDeck,
+} from '@/lib/fsrs'
+import FlashcardCard from '@/components/flashcard/FlashcardCard'
+import CompletionScreen from '@/components/flashcard/CompletionScreen'
+import type { SessionStats, MasteryChange } from '@/components/flashcard/CompletionScreen'
+import {
+  loadProfile,
+ succeeded in 0ms:
+/**
+ * ExamCountdown — displays a countdown badge/card for upcoming exams.
+ * Editorial style: warm paper bg, serif numbers, left accent border.
+ */
+import { AlertTriangle, Clock } from 'lucide-react'
+import type { ExamConfig } from '@/lib/agenda-engine'
+import { differenceInDays } from 'date-fns'
+
+interface ExamCountdownProps {
+  examConfig: ExamConfig
+  compact?: boolean
+}
+
+function getDaysLeft(examDate: string): number {
+  return differenceInDays(new Date(examDate), new Date())
+}
+
+function getUrgencyAccent(daysLeft: number): { text: string; border: string; bg: string } {
+  if (daysLeft <= 3) return { text: 'text-red-primary', border: 'border-red-primary/40', bg: 'bg-bg-accent' }
+  if (daysLeft <= 7) return { text: 'text-accent-gold', border: 'border-accent-gold/40', bg: 'bg-bg-accent' }
+codex
+我已经看到现有代码里有三个可直接复用的支点：`ts-fsrs` 的复习日志、`student-model` 的 mastery、`ExamCountdown` 的考试时间入口。最后再读一次 `agenda-engine` 和现有 mock 数据结构，我会把三套方案和你当前数据模型对齐，避免接口设计冲突。
+exec
+/bin/zsh -lc "sed -n '1,220p' src/pages/ReviewPage.tsx" in /Users/ziway/Downloads/工程项目/智阶新版exec
+/bin/zsh -lc "sed -n '1,220p' src/mocks/activities.ts" in /Users/ziway/Downloads/工程项目/智阶新版 succeeded in 0ms:
+export interface Activity {
+  id: string
+  type: 'upload' | 'study' | 'note' | 'quiz'
+  message: string
+  time: string
+  courseName: string
+}
+
+export const activities: Activity[] = [
+  {
+    id: 'a1',
+    type: 'upload',
+    message: 'Prof. Mueller 上传了「图论进阶 - 第5周」',
+    time: '2 小时前',
+    courseName: '离散数学',
+  },
+  {
+    id: 'a2',
+    type: 'study',
+    message: '你完成了「梯度下降与优化方法」的精读',
+ succeeded in 0ms:
+/**
+ * ReviewPage — /my/flashcards/:deckId/review
+ * Loads a deck by courseId, gets due cards, renders ReviewSession.
+ */
+import { useEffect, useState } from 'react'
+import { useParams, useNavigate } from 'react-router-dom'
+import { motion } from 'framer-motion'
+import type { FlashcardDeck, FlashcardCard } from '@/lib/fsrs'
+import { loadDeck, getDueCards } from '@/lib/fsrs'
+import { initMockFlashcards } from '@/mocks/flashcards'
+import ReviewSession from '@/components/flashcard/ReviewSession'
+
+export default function ReviewPage() {
+  const { deckId } = useParams<{ deckId: string }>()
+  const navigate = useNavigate()
+
+  const [deck, setDeck] = useState<FlashcardDeck | null>(null)
+  const [dueCards, setDueCards] = useState<FlashcardCard[]>([])
+  const [loading, setLoading] = useState(true)
+
+exec
+/bin/zsh -lc "sed -n '1,220p' src/pages/AgendaPage.tsx" in /Users/ziway/Downloads/工程项目/智阶新版exec
+/bin/zsh -lc "sed -n '1,220p' src/mocks/courses.ts" in /Users/ziway/Downloads/工程项目/智阶新版 succeeded in 0ms:
+/**
+ * AgendaPage — /agenda
+ * Full agenda timeline view with date display, week navigation,
+ * exam countdowns, grouped items, and a floating add-task input.
+ */
+import { useEffect, useState, useCallback, useRef } from 'react'
+import { motion, type Variants } from 'framer-motion'
+import {
+  ChevronLeft,
+  ChevronRight,
+  CalendarDays,
+  Plus,
+  Clock,
+} from 'lucide-react'
+import { format, addDays, subDays, startOfWeek, endOfWeek, isSameDay, isToday } from 'date-fns'
+import { zhCN } from 'date-fns/locale'
+import type { DailyAgenda, ExamConfig, TodoItem } from '@/lib/agenda-engine'
+import { generateDailyAgenda, loadExamConfigs, loadTodos, saveTodos } from '@/lib/agenda-engine'
+import { loadAllDecks } from '@/lib/fsrs'
+import { initMockAgenda, getMockStudyItems } from '@/mocks/agenda'
+ succeeded in 0ms:
+export interface Course {
+  id: string
+  name: string
+  school: string
+  description: string
+  tags: string[]
+  materialCount: number
+  studentCount: number
+  category: string
+}
+
+export const courses: Course[] = [
+  {
+    id: 'dm-tum',
+    name: '离散数学',
+    school: 'TU Munich',
+    description: '集合论、图论、组合数学与数理逻辑的基础课程，涵盖证明方法与算法分析基础。',
+    tags: ['数学', '计算机基础'],
+    materialCount: 42,
+    studentCount: 186,
+exec
+/bin/zsh -lc "sed -n '1,260p' src/lib/agenda-engine.ts" in /Users/ziway/Downloads/工程项目/智阶新版 succeeded in 0ms:
+/**
+ * Agenda Engine — generates unified daily learning plans.
+ * Merges flashcard reviews, study tasks, exam prep, and manual todos.
+ */
+import { differenceInDays, format, isToday } from 'date-fns'
+import type { FlashcardDeck } from '@/lib/fsrs'
+import { getDueCards } from '@/lib/fsrs'
+
+/* ------------------------------------------------------------------ */
+/*  Types                                                              */
+/* ------------------------------------------------------------------ */
+
+export interface StudyItem {
+  type: 'study'
+  id: string
+  courseId: string
+  courseName: string
+  moduleName: string
+  estimatedMin: number
+  priority: 'high' | 'medium' | 'low'
+codex
+以下方案按你当前项目栈对齐设计：前端基于 `React 19 + Vite + Tailwind + ts-fsrs`，可直接接到现有 [src/lib/fsrs.ts](/Users/ziway/Downloads/工程项目/智阶新版/src/lib/fsrs.ts)、[src/lib/student-model.ts](/Users/ziway/Downloads/工程项目/智阶新版/src/lib/student-model.ts)、[src/lib/agenda-engine.ts](/Users/ziway/Downloads/工程项目/智阶新版/src/lib/agenda-engine.ts)、[src/components/agenda/ExamCountdown.tsx](/Users/ziway/Downloads/工程项目/智阶新版/src/components/agenda/ExamCountdown.tsx)。
+
+**总体架构**
+后端建议拆成 3 个 bounded context：`gamification`、`analytics`、`exam_prep`。FastAPI 结构统一为：
+```text
+backend/
+  app/
+    api/v1/
+      gamification.py
+      analytics.py
+      exam_prep.py
+    models/
+      gamification.py
+      analytics.py
+      exam_prep.py
+    schemas/
+      gamification.py
+      analytics.py
+      exam_prep.py
+    services/
+      gamification_service.py
+      analytics_service.py
+      exam_prep_service.py
+    workers/
+      achievements.py
+      daily_rollup.py
+    db/
+      base.py
+      session.py
+      migrations/
+```
+
+**1. 游戏化激励系统**
+核心规则：等级阈值用累计经验 `required_xp(level)=100 * level^1.5`，50 级封顶；`streak` 由“自然日完成至少一次有效学习事件”驱动；`streak_freeze` 优先消耗，防止断签；成就由事件流异步判定。
+
+PostgreSQL：
+```sql
+create table user_gamification_profiles (
+  user_id uuid primary key,
+  total_xp int not null default 0,
+  current_level int not null default 1 check (current_level between 1 and 50),
+  current_streak int not null default 0,
+  longest_streak int not null default 0,
+  streak_freeze_count int not null default 0,
+  last_activity_date date,
+  updated_at timestamptz not null default now()
+);
+
+create table xp_events (
+  id uuid primary key,
+  user_id uuid not null,
+  source_type text not null,         -- review/session/exam_prep/quiz
+  source_id uuid,
+  xp_delta int not null,
+  meta jsonb not null default '{}',
+  created_at timestamptz not null default now()
+);
+create index idx_xp_events_user_time on xp_events(user_id, created_at desc);
+
+create table achievement_definitions (
+  code text primary key,             -- first_review, streak_7, mastery_80
+  name text not null,
+  category text not null,
+  trigger_type text not null,
+  trigger_rule jsonb not null,
+  xp_reward int not null default 0,
+  badge_icon text
+);
+
+create table user_achievements (
+  id uuid primary key,
+  user_id uuid not null,
+  achievement_code text not null references achievement_definitions(code),
+  unlocked_at timestamptz not null default now(),
+  progress jsonb,
+  unique (user_id, achievement_code)
+);
+```
+
+FastAPI API：
+- `POST /api/v1/gamification/events` 写入 XP 事件并返回升级/成就结果
+- `GET /api/v1/gamification/profile` 返回 `xp/level/streak/freezes`
+- `POST /api/v1/gamification/streak/check-in` 每日结算 streak
+- `GET /api/v1/gamification/achievements`
+- `POST /api/v1/gamification/freezes/purchase`
+
+关键后端逻辑：
+```python
+def level_from_xp(total_xp: int) -> int:
+    level = 1
+    while level < 50 and total_xp >= int(100 * ((level + 1) ** 1.5)):
+        level += 1
+    return level
+
+def apply_daily_streak(profile, activity_date: date):
+    if profile.last_activity_date is None:
+        profile.current_streak = 1
+    elif activity_date == profile.last_activity_date:
+        return profile
+    elif activity_date == profile.last_activity_date + timedelta(days=1):
+        profile.current_streak += 1
+    elif activity_date > profile.last_activity_date + timedelta(days=1):
+        gap = (activity_date - profile.last_activity_date).days - 1
+        if gap > 0 and profile.streak_freeze_count >= gap:
+            profile.streak_freeze_count -= gap
+            profile.current_streak += 1
+        else:
+            profile.current_streak = 1
+    profile.longest_streak = max(profile.longest_streak, profile.current_streak)
+    profile.last_activity_date = activity_date
+    return profile
+```
+
+前端 React 组件 spec：
+- `GamificationHeader`: 顶部显示 `Level / XP Progress / Streak / Freeze`
+- `XPToast`: 完成复习后弹出 `+12 XP`
+- `AchievementDrawer`: 新徽章列表与解锁动画
+- `CelebrationLayer`: 升级、连续学习、成就触发时调用 `canvas-confetti`
+- `LevelMap`: 50 级路线图，标明下一级阈值
+
+前端事件接入点：
+- 在 [src/components/flashcard/ReviewSession.tsx](/Users/ziway/Downloads/工程项目/智阶新版/src/components/flashcard/ReviewSession.tsx) 的 `handleRating` 后调用 `recordGamificationEvent`
+- 在日程完成、考试 Sprint 提交后也发事件
+
+前端片段：
+```tsx
+if (result.levelUp || result.achievementUnlocked.length > 0) {
+  confetti({ particleCount: 140, spread: 90, origin: { y: 0.65 } })
+}
+```
+
+**2. 真实学习统计系统**
+数据源不要再读 mock，直接以 `FSRS reviewLogs + study_sessions + module_mastery_snapshots` 聚合。最稳妥做法是把目前本地 `reviewLogs` 结构服务端化，落库后定时生成日汇总。
+
+PostgreSQL：
+```sql
+create table review_logs (
+  id uuid primary key,
+  user_id uuid not null,
+  course_id text not null,
+  module_id text,
+  card_id text not null,
+  rating smallint not null check (rating between 1 and 4),
+  response_ms int,
+  reviewed_at timestamptz not null,
+  is_correct boolean generated always as (rating >= 3) stored
+);
+create index idx_review_logs_user_time on review_logs(user_id, reviewed_at desc);
+
+create table study_sessions (
+  id uuid primary key,
+  user_id uuid not null,
+  course_id text not null,
+  module_id text,
+  session_type text not null,        -- review/read/practice/mock_exam
+  started_at timestamptz not null,
+  ended_at timestamptz not null,
+  duration_seconds int not null
+);
+
+create table module_mastery_snapshots (
+  id uuid primary key,
+  user_id uuid not null,
+  course_id text not null,
+  module_id text not null,
+  mastery numeric(5,4) not null,
+  snapshot_date date not null
+);
+create index idx_mastery_snapshots_user_date on module_mastery_snapshots(user_id, snapshot_date desc);
+```
+
+FastAPI API：
+- `GET /api/v1/analytics/overview?range=day|week|month`
+- `GET /api/v1/analytics/review-trend?days=30`
+- `GET /api/v1/analytics/mastery-radar?course_id=...`
+- `GET /api/v1/analytics/activity-heatmap?days=365`
+- `POST /api/v1/analytics/review-logs/batch` 批量写入 FSRS 日志
+
+聚合 SQL 思路：
+```sql
+select
+  date_trunc('day', reviewed_at) as day,
+  count(*) as review_count,
+  avg(case when rating >= 3 then 1.0 else 0.0 end) as accuracy,
+  sum(coalesce(response_ms, 0)) / 1000 as review_seconds
+from review_logs
+where user_id = :user_id
+  and reviewed_at >= now() - interval '30 days'
+group by 1
+order by 1;
+```
+
+前端 React 组件 spec：
+- `StudyStatsOverviewCard`: 今日/本周/本月分钟数、复习卡数、正确率
+- `AccuracyTrendChart`: `recharts` 的 `LineChart + Area`
+- `CourseMasteryRadar`: `RadarChart`，维度为课程下各 module mastery
+- `LearningHeatmap`: `react-activity-calendar`，值来自 `daily_review_count + daily_study_minutes`
+- `StudyDistributionChart`: `BarChart` 显示课程间时间分布
+
+建议数据 DTO：
+```ts
+type AnalyticsOverview = {
+  todayMinutes: number
+  weekMinutes: number
+  monthMinutes: number
+  todayReviews: number
+  accuracy7d: number
+}
+```
+
+前端片段：
+```tsx
+<ActivityCalendar
+  data={heatmapData.map(d => ({ date: d.date, count: d.intensity, level: d.level }))}
+  maxLevel={4}
+/>
+
+<RadarChart data={radarData}>
+  <PolarGrid />
+  <PolarAngleAxis dataKey="moduleName" />
+  <Radar dataKey="masteryPct" stroke="#B42318" fill="#B42318" fillOpacity={0.25} />
+</RadarChart>
+```
+
+**3. 四阶段考试备考模型**
+模型核心是“倒计时驱动的阶段切换 + mastery 驱动的资源分配”。建议阶段：
+- `Phase 1 Survey`: `D-30 ~ D-21`，做诊断测验，识别盲点
+- `Phase 2 Learn`: `D-20 ~ D-11`，高权重弱模块集中突破
+- `Phase 3 Consolidate`: `D-10 ~ D-4`，FSRS 闪卡 + 错题回顾
+- `Phase 4 Sprint`: `D-3 ~ D-0`，整卷模拟、计时、复盘
+
+时间分配函数：
+```python
+def phase_by_days_left(days_left: int) -> str:
+    if days_left >= 21: return "survey"
+    if days_left >= 11: return "learn"
+    if days_left >= 4: return "consolidate"
+    return "sprint"
+
+def allocate_minutes(days_left: int, weak_ratio: float) -> dict[str, int]:
+    total = 60 if days_left > 14 else 90 if days_left > 5 else 120
+    if days_left >= 21:
+        return {"survey": int(total*0.7), "review": int(total*0.3)}
+    if days_left >= 11:
+        return {"learn": int(total*(0.6 + weak_ratio*0.2)), "review": total//4, "quiz": total//6}
+    if days_left >= 4:
+        return {"flashcards": total//3, "mistakes": total//3, "mixed_quiz": total - 2*(total//3)}
+    return {"mock_exam": int(total*0.6), "error_review": int(total*0.25), "flashcards": total - int(total*0.85)}
+```
+
+PostgreSQL：
+```sql
+create table exam_plans (
+  id uuid primary key,
+  user_id uuid not null,
+  course_id text not null,
+  exam_date date not null,
+  target_score int,
+  current_phase text not null,
+  daily_minutes_target int not null,
+  created_at timestamptz not null default now()
+);
+
+create table exam_phase_tasks (
+  id uuid primary key,
+  plan_id uuid not null references exam_plans(id),
+  phase text not null,
+  module_id text,
+  task_type text not null,           -- diagnostic/deep_learn/flashcard/mock_exam/error_review
+  title text not null,
+  estimated_minutes int not null,
+  priority int not null default 0,
+  status text not null default 'todo'
+);
+
+create table mock_exam_attempts (
+  id uuid primary key,
+  plan_id uuid not null references exam_plans(id),
+  score numeric(5,2),
+  duration_seconds int,
+  mistakes jsonb not null default '[]',
+  taken_at timestamptz not null default now()
+);
+```
+
+FastAPI API：
+- `POST /api/v1/exam-prep/plans` 创建考试计划
+- `GET /api/v1/exam-prep/plans/{course_id}` 获取当前计划与阶段
+- `POST /api/v1/exam-prep/plans/{id}/refresh` 按最新 mastery 重算任务
+- `GET /api/v1/exam-prep/plans/{id}/daily-agenda`
+- `POST /api/v1/exam-prep/mock-exams/{id}/submit`
+
+前端 React 组件 spec：
+- `ExamPrepDashboard`: 总览当前 phase、剩余天数、今日目标
+- `PhaseStepper`: 4 阶段进度条，显示当前阶段和切换条件
+- `BlindSpotScanPanel`: Survey 阶段的诊断题结果
+- `WeakModuleFocusList`: Learn 阶段按 `exam_weight * (1 - mastery)` 排序
+- `ConsolidationBoard`: Consolidate 阶段的闪卡队列、错题回顾
+- `SprintSimulatorCard`: Sprint 阶段的模拟卷入口、成绩趋势、错因分布
+
+任务生成排序：
+```python
+priority_score = exam_weight * (1 - mastery) * freshness_factor
+```
+
+前端集成点：
+- 在 [src/lib/agenda-engine.ts](/Users/ziway/Downloads/工程项目/智阶新版/src/lib/agenda-engine.ts) 增加 `getExamPrepPhaseItems`
+- 在 [src/pages/AgendaPage.tsx](/Users/ziway/Downloads/工程项目/智阶新版/src/pages/AgendaPage.tsx) 将考试任务从“固定 estimatedMin”升级为“phase-aware”
+- 复用 [src/components/agenda/ExamCountdown.tsx](/Users/ziway/Downloads/工程项目/智阶新版/src/components/agenda/ExamCountdown.tsx) 作为备考入口卡
+
+如果你要继续落地，我建议下一步直接做两件事：先把 `review_logs / study_sessions / user_gamification_profiles / exam_plans` 这 4 张核心表建出来，再按这三组 API 各出一版 FastAPI `router + schema + service` 骨架。这样能最快把 mock 数据替换掉。
+tokens used
+32,335
+以下方案按你当前项目栈对齐设计：前端基于 `React 19 + Vite + Tailwind + ts-fsrs`，可直接接到现有 [src/lib/fsrs.ts](/Users/ziway/Downloads/工程项目/智阶新版/src/lib/fsrs.ts)、[src/lib/student-model.ts](/Users/ziway/Downloads/工程项目/智阶新版/src/lib/student-model.ts)、[src/lib/agenda-engine.ts](/Users/ziway/Downloads/工程项目/智阶新版/src/lib/agenda-engine.ts)、[src/components/agenda/ExamCountdown.tsx](/Users/ziway/Downloads/工程项目/智阶新版/src/components/agenda/ExamCountdown.tsx)。
+
+**总体架构**
+后端建议拆成 3 个 bounded context：`gamification`、`analytics`、`exam_prep`。FastAPI 结构统一为：
+```text
+backend/
+  app/
+    api/v1/
+      gamification.py
+      analytics.py
+      exam_prep.py
+    models/
+      gamification.py
+      analytics.py
+      exam_prep.py
+    schemas/
+      gamification.py
+      analytics.py
+      exam_prep.py
+    services/
+      gamification_service.py
+      analytics_service.py
+      exam_prep_service.py
+    workers/
+      achievements.py
+      daily_rollup.py
+    db/
+      base.py
+      session.py
+      migrations/
+```
+
+**1. 游戏化激励系统**
+核心规则：等级阈值用累计经验 `required_xp(level)=100 * level^1.5`，50 级封顶；`streak` 由“自然日完成至少一次有效学习事件”驱动；`streak_freeze` 优先消耗，防止断签；成就由事件流异步判定。
+
+PostgreSQL：
+```sql
+create table user_gamification_profiles (
+  user_id uuid primary key,
+  total_xp int not null default 0,
+  current_level int not null default 1 check (current_level between 1 and 50),
+  current_streak int not null default 0,
+  longest_streak int not null default 0,
+  streak_freeze_count int not null default 0,
+  last_activity_date date,
+  updated_at timestamptz not null default now()
+);
+
+create table xp_events (
+  id uuid primary key,
+  user_id uuid not null,
+  source_type text not null,         -- review/session/exam_prep/quiz
+  source_id uuid,
+  xp_delta int not null,
+  meta jsonb not null default '{}',
+  created_at timestamptz not null default now()
+);
+create index idx_xp_events_user_time on xp_events(user_id, created_at desc);
+
+create table achievement_definitions (
+  code text primary key,             -- first_review, streak_7, mastery_80
+  name text not null,
+  category text not null,
+  trigger_type text not null,
+  trigger_rule jsonb not null,
+  xp_reward int not null default 0,
+  badge_icon text
+);
+
+create table user_achievements (
+  id uuid primary key,
+  user_id uuid not null,
+  achievement_code text not null references achievement_definitions(code),
+  unlocked_at timestamptz not null default now(),
+  progress jsonb,
+  unique (user_id, achievement_code)
+);
+```
+
+FastAPI API：
+- `POST /api/v1/gamification/events` 写入 XP 事件并返回升级/成就结果
+- `GET /api/v1/gamification/profile` 返回 `xp/level/streak/freezes`
+- `POST /api/v1/gamification/streak/check-in` 每日结算 streak
+- `GET /api/v1/gamification/achievements`
+- `POST /api/v1/gamification/freezes/purchase`
+
+关键后端逻辑：
+```python
+def level_from_xp(total_xp: int) -> int:
+    level = 1
+    while level < 50 and total_xp >= int(100 * ((level + 1) ** 1.5)):
+        level += 1
+    return level
+
+def apply_daily_streak(profile, activity_date: date):
+    if profile.last_activity_date is None:
+        profile.current_streak = 1
+    elif activity_date == profile.last_activity_date:
+        return profile
+    elif activity_date == profile.last_activity_date + timedelta(days=1):
+        profile.current_streak += 1
+    elif activity_date > profile.last_activity_date + timedelta(days=1):
+        gap = (activity_date - profile.last_activity_date).days - 1
+        if gap > 0 and profile.streak_freeze_count >= gap:
+            profile.streak_freeze_count -= gap
+            profile.current_streak += 1
+        else:
+            profile.current_streak = 1
+    profile.longest_streak = max(profile.longest_streak, profile.current_streak)
+    profile.last_activity_date = activity_date
+    return profile
+```
+
+前端 React 组件 spec：
+- `GamificationHeader`: 顶部显示 `Level / XP Progress / Streak / Freeze`
+- `XPToast`: 完成复习后弹出 `+12 XP`
+- `AchievementDrawer`: 新徽章列表与解锁动画
+- `CelebrationLayer`: 升级、连续学习、成就触发时调用 `canvas-confetti`
+- `LevelMap`: 50 级路线图，标明下一级阈值
+
+前端事件接入点：
+- 在 [src/components/flashcard/ReviewSession.tsx](/Users/ziway/Downloads/工程项目/智阶新版/src/components/flashcard/ReviewSession.tsx) 的 `handleRating` 后调用 `recordGamificationEvent`
+- 在日程完成、考试 Sprint 提交后也发事件
+
+前端片段：
+```tsx
+if (result.levelUp || result.achievementUnlocked.length > 0) {
+  confetti({ particleCount: 140, spread: 90, origin: { y: 0.65 } })
+}
+```
+
+**2. 真实学习统计系统**
+数据源不要再读 mock，直接以 `FSRS reviewLogs + study_sessions + module_mastery_snapshots` 聚合。最稳妥做法是把目前本地 `reviewLogs` 结构服务端化，落库后定时生成日汇总。
+
+PostgreSQL：
+```sql
+create table review_logs (
+  id uuid primary key,
+  user_id uuid not null,
+  course_id text not null,
+  module_id text,
+  card_id text not null,
+  rating smallint not null check (rating between 1 and 4),
+  response_ms int,
+  reviewed_at timestamptz not null,
+  is_correct boolean generated always as (rating >= 3) stored
+);
+create index idx_review_logs_user_time on review_logs(user_id, reviewed_at desc);
+
+create table study_sessions (
+  id uuid primary key,
+  user_id uuid not null,
+  course_id text not null,
+  module_id text,
+  session_type text not null,        -- review/read/practice/mock_exam
+  started_at timestamptz not null,
+  ended_at timestamptz not null,
+  duration_seconds int not null
+);
+
+create table module_mastery_snapshots (
+  id uuid primary key,
+  user_id uuid not null,
+  course_id text not null,
+  module_id text not null,
+  mastery numeric(5,4) not null,
+  snapshot_date date not null
+);
+create index idx_mastery_snapshots_user_date on module_mastery_snapshots(user_id, snapshot_date desc);
+```
+
+FastAPI API：
+- `GET /api/v1/analytics/overview?range=day|week|month`
+- `GET /api/v1/analytics/review-trend?days=30`
+- `GET /api/v1/analytics/mastery-radar?course_id=...`
+- `GET /api/v1/analytics/activity-heatmap?days=365`
+- `POST /api/v1/analytics/review-logs/batch` 批量写入 FSRS 日志
+
+聚合 SQL 思路：
+```sql
+select
+  date_trunc('day', reviewed_at) as day,
+  count(*) as review_count,
+  avg(case when rating >= 3 then 1.0 else 0.0 end) as accuracy,
+  sum(coalesce(response_ms, 0)) / 1000 as review_seconds
+from review_logs
+where user_id = :user_id
+  and reviewed_at >= now() - interval '30 days'
+group by 1
+order by 1;
+```
+
+前端 React 组件 spec：
+- `StudyStatsOverviewCard`: 今日/本周/本月分钟数、复习卡数、正确率
+- `AccuracyTrendChart`: `recharts` 的 `LineChart + Area`
+- `CourseMasteryRadar`: `RadarChart`，维度为课程下各 module mastery
+- `LearningHeatmap`: `react-activity-calendar`，值来自 `daily_review_count + daily_study_minutes`
+- `StudyDistributionChart`: `BarChart` 显示课程间时间分布
+
+建议数据 DTO：
+```ts
+type AnalyticsOverview = {
+  todayMinutes: number
+  weekMinutes: number
+  monthMinutes: number
+  todayReviews: number
+  accuracy7d: number
+}
+```
+
+前端片段：
+```tsx
+<ActivityCalendar
+  data={heatmapData.map(d => ({ date: d.date, count: d.intensity, level: d.level }))}
+  maxLevel={4}
+/>
+
+<RadarChart data={radarData}>
+  <PolarGrid />
+  <PolarAngleAxis dataKey="moduleName" />
+  <Radar dataKey="masteryPct" stroke="#B42318" fill="#B42318" fillOpacity={0.25} />
+</RadarChart>
+```
+
+**3. 四阶段考试备考模型**
+模型核心是“倒计时驱动的阶段切换 + mastery 驱动的资源分配”。建议阶段：
+- `Phase 1 Survey`: `D-30 ~ D-21`，做诊断测验，识别盲点
+- `Phase 2 Learn`: `D-20 ~ D-11`，高权重弱模块集中突破
+- `Phase 3 Consolidate`: `D-10 ~ D-4`，FSRS 闪卡 + 错题回顾
+- `Phase 4 Sprint`: `D-3 ~ D-0`，整卷模拟、计时、复盘
+
+时间分配函数：
+```python
+def phase_by_days_left(days_left: int) -> str:
+    if days_left >= 21: return "survey"
+    if days_left >= 11: return "learn"
+    if days_left >= 4: return "consolidate"
+    return "sprint"
+
+def allocate_minutes(days_left: int, weak_ratio: float) -> dict[str, int]:
+    total = 60 if days_left > 14 else 90 if days_left > 5 else 120
+    if days_left >= 21:
+        return {"survey": int(total*0.7), "review": int(total*0.3)}
+    if days_left >= 11:
+        return {"learn": int(total*(0.6 + weak_ratio*0.2)), "review": total//4, "quiz": total//6}
+    if days_left >= 4:
+        return {"flashcards": total//3, "mistakes": total//3, "mixed_quiz": total - 2*(total//3)}
+    return {"mock_exam": int(total*0.6), "error_review": int(total*0.25), "flashcards": total - int(total*0.85)}
+```
+
+PostgreSQL：
+```sql
+create table exam_plans (
+  id uuid primary key,
+  user_id uuid not null,
+  course_id text not null,
+  exam_date date not null,
+  target_score int,
+  current_phase text not null,
+  daily_minutes_target int not null,
+  created_at timestamptz not null default now()
+);
+
+create table exam_phase_tasks (
+  id uuid primary key,
+  plan_id uuid not null references exam_plans(id),
+  phase text not null,
+  module_id text,
+  task_type text not null,           -- diagnostic/deep_learn/flashcard/mock_exam/error_review
+  title text not null,
+  estimated_minutes int not null,
+  priority int not null default 0,
+  status text not null default 'todo'
+);
+
+create table mock_exam_attempts (
+  id uuid primary key,
+  plan_id uuid not null references exam_plans(id),
+  score numeric(5,2),
+  duration_seconds int,
+  mistakes jsonb not null default '[]',
+  taken_at timestamptz not null default now()
+);
+```
+
+FastAPI API：
+- `POST /api/v1/exam-prep/plans` 创建考试计划
+- `GET /api/v1/exam-prep/plans/{course_id}` 获取当前计划与阶段
+- `POST /api/v1/exam-prep/plans/{id}/refresh` 按最新 mastery 重算任务
+- `GET /api/v1/exam-prep/plans/{id}/daily-agenda`
+- `POST /api/v1/exam-prep/mock-exams/{id}/submit`
+
+前端 React 组件 spec：
+- `ExamPrepDashboard`: 总览当前 phase、剩余天数、今日目标
+- `PhaseStepper`: 4 阶段进度条，显示当前阶段和切换条件
+- `BlindSpotScanPanel`: Survey 阶段的诊断题结果
+- `WeakModuleFocusList`: Learn 阶段按 `exam_weight * (1 - mastery)` 排序
+- `ConsolidationBoard`: Consolidate 阶段的闪卡队列、错题回顾
+- `SprintSimulatorCard`: Sprint 阶段的模拟卷入口、成绩趋势、错因分布
+
+任务生成排序：
+```python
+priority_score = exam_weight * (1 - mastery) * freshness_factor
+```
+
+前端集成点：
+- 在 [src/lib/agenda-engine.ts](/Users/ziway/Downloads/工程项目/智阶新版/src/lib/agenda-engine.ts) 增加 `getExamPrepPhaseItems`
+- 在 [src/pages/AgendaPage.tsx](/Users/ziway/Downloads/工程项目/智阶新版/src/pages/AgendaPage.tsx) 将考试任务从“固定 estimatedMin”升级为“phase-aware”
+- 复用 [src/components/agenda/ExamCountdown.tsx](/Users/ziway/Downloads/工程项目/智阶新版/src/components/agenda/ExamCountdown.tsx) 作为备考入口卡
+
+如果你要继续落地，我建议下一步直接做两件事：先把 `review_logs / study_sessions / user_gamification_profiles / exam_plans` 这 4 张核心表建出来，再按这三组 API 各出一版 FastAPI `router + schema + service` 骨架。这样能最快把 mock 数据替换掉。

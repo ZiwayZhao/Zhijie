@@ -1,0 +1,800 @@
+    )
+```
+
+```python
+# GET /api/v1/evolutions/suggestions
+@router.get("/evolutions/suggestions")
+async def list_suggestions(deck_id: str, status: str = "pending_review", db=Depends(get_db), user=Depends(get_user)):
+    return evolution_repo.list_by_deck(db, user.id, deck_id, status)
+```
+
+```python
+# POST /api/v1/evolutions/{id}/apply
+@router.post("/evolutions/{evolution_id}/apply")
+async def apply_suggestion(evolution_id: str, db=Depends(get_db), user=Depends(get_user)):
+    evo = evolution_repo.get_for_update(db, evolution_id, user.id)
+    apply_service.apply(db, evo, reviewer_id=user.id)
+    db.commit()
+    return {"ok": True}
+```
+
+**10. 进化执行逻辑**
+```python
+# app/services/evolution/apply_service.py
+def apply(db, evo, reviewer_id: str):
+    proposal = evo.proposal
+    action = proposal["action"]
+
+    if action == "split":
+        retire_original_card(db, evo.card_id)
+        for n in proposal["new_notes"]:
+            note_id = create_note(db, evo.deck_id, n, parent_note_id=evo.note_id)
+            create_card(db, evo.deck_id, note_id, user_id=evo.user_id)
+
+    elif action == "retire":
+        retire_original_card(db, evo.card_id)
+
+    elif action == "merge":
+        retire_original_card(db, evo.card_id)
+        mark_note_merged(db, evo.note_id, proposal["merge_target_note_id"])
+
+    elif action == "rewrite":
+        update_note_fields(db, evo.note_id, proposal["rewrite_fields"])
+
+    elif action == "add_hint":
+        update_note_hint(db, evo.note_id, proposal["hint"])
+
+    elif action == "add_prerequisite":
+        for n in proposal["new_notes"]:
+            note_id = create_note(db, evo.deck_id, n, parent_note_id=evo.note_id)
+            create_card(db, evo.deck_id, note_id, user_id=evo.user_id)
+
+    mark_evolution_applied(db, evo.id, reviewer_id)
+```
+
+**11. 前端：React + TypeScript 预览组件**
+```ts
+export type EvolutionAction =
+  | 'split'
+  | 'retire'
+  | 'merge'
+  | 'rewrite'
+  | 'add_hint'
+  | 'add_prerequisite'
+
+export interface EvolutionSuggestion {
+  id: string
+  triggerType: string
+  triggerMetrics: Record<string, number | string>
+  reviewStatus: 'pending_review' | 'approved' | 'rejected' | 'applied'
+  proposal: {
+    action: EvolutionAction
+    reason: string
+    confidence: number
+    new_notes?: Array<{ front: string; back: string; hint?: string }>
+    rewrite_fields?: { front: string; back: string }
+    hint?: string
+    merge_target_note_id?: string
+  }
+  qcReport: {
+    duplicateRisk: 'low' | 'medium' | 'high'
+    minimumInfoIssues: string[]
+  }
+  sourceSnapshot: {
+    front: string
+    back: string
+    hint?: string
+  }
+}
+```
+
+```tsx
+export function EvolutionPreviewCard({
+  suggestion,
+  onApprove,
+  onReject,
+}: {
+  suggestion: EvolutionSuggestion
+  onApprove: (id: string) => void
+  onReject: (id: string) => void
+}) {
+  const p = suggestion.proposal
+  return (
+    <section className="rounded-2xl border bg-white p-4 shadow-sm">
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="text-sm font-semibold">进化建议</h3>
+        <span className="text-xs text-slate-500">
+          置信度 {Math.round(p.confidence * 100)}%
+        </span>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2">
+        <div className="rounded-xl bg-slate-50 p-3">
+          <div className="text-xs text-slate-500">原卡</div>
+          <div className="mt-2 text-sm font-medium">{suggestion.sourceSnapshot.front}</div>
+          <div className="mt-1 text-sm text-slate-700">{suggestion.sourceSnapshot.back}</div>
+        </div>
+
+        <div className="rounded-xl bg-amber-50 p-3">
+          <div className="text-xs text-slate-500">建议</div>
+          <div className="mt-2 text-sm font-medium">{p.action}</div>
+          <div className="mt-1 text-sm text-slate-700">{p.reason}</div>
+          {p.rewrite_fields && <div className="mt-2 text-sm">{p.rewrite_fields.front}</div>}
+          {p.hint && <div className="mt-2 text-sm">提示：{p.hint}</div>}
+          {p.new_notes?.map((n, i) => (
+            <div key={i} className="mt-2 rounded-lg border bg-white p-2 text-sm">
+              <div>{n.front}</div>
+              <div className="text-slate-600">{n.back}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-3 text-xs text-slate-500">
+        去重风险：{suggestion.qcReport.duplicateRisk}，
+        最小信息问题：{suggestion.qcReport.minimumInfoIssues.join(', ') || '无'}
+      </div>
+
+      <div className="mt-4 flex gap-2">
+        <button className="rounded-lg bg-slate-900 px-3 py-2 text-white" onClick={() => onApprove(suggestion.id)}>
+          应用
+        </button>
+        <button className="rounded-lg border px-3 py-2" onClick={() => onReject(suggestion.id)}>
+          拒绝
+        </button>
+      </div>
+    </section>
+  )
+}
+```
+
+**12. 实施建议**
+第一阶段先做 4 个低风险动作：`split / retire / rewrite / add_hint`。  
+第二阶段再加 `merge` 和 `RPKT 前置卡`，因为这两类最依赖图结构和去重精度。  
+真正上线时，建议默认“全部人工确认”，等你积累 2~4 周日志后，再考虑对白名单场景开放自动应用。
+
+如果你要，我下一步可以直接把这套方案进一步展开成：
+1. 可运行的 FastAPI 文件骨架  
+2. SQLAlchemy ORM 模型  
+3. 完整的 `evolutions.py` 路由代码  
+4. 前端 API hooks 和页面集成代码
+tokens used
+25,248
+下面这套方案可以直接落到你当前已有的 FSRS 流程上，核心原则是：
+
+FSRS 继续只负责“何时复习”，自进化层只负责“卡片内容是否应该变”。从实现上做成异步旁路服务，挂在复习提交之后，避免污染排程核心。这个设计也和你现有前端 `ReviewSession -> detectTriggers -> suggestions` 的边界一致，已有实现可参考 [src/lib/fsrs.ts](/Users/ziway/Downloads/工程项目/智阶新版/src/lib/fsrs.ts) 和 [src/lib/card-evolution.ts](/Users/ziway/Downloads/工程项目/智阶新版/src/lib/card-evolution.ts)。
+
+**1. 总体架构**
+1. 用户提交一次复习结果到 `POST /api/v1/flashcards/review`。
+2. 后端更新 `flashcard_cards` 的 FSRS 状态、写入 `review_logs`。
+3. 同步执行 `TriggerDetector`，识别 5 类进化触发。
+4. 若命中触发，写入 `evolution_logs(status='pending_llm')`，再异步调用 Claude 生成候选方案。
+5. Claude 仅返回结构化 JSON，不直接改库。
+6. `QualityGuard` 做最小信息原则检查、TF-IDF 去重、场景合法性校验。
+7. 通过校验后把建议保存为 `pending_review`。
+8. 前端拉取建议列表，显示“原卡 / 建议后卡 / 风险提示 / 去重结果 / 触发原因”。
+9. 用户确认后调用 `POST /api/v1/evolutions/{id}/apply`，事务性执行拆分、退役、合并、改写、加提示或补前置卡。
+10. 所有动作都保留审计日志，可回滚为“恢复原 note/card”。
+
+**2. 5 种触发规则**
+```python
+# app/services/evolution/trigger_detector.py
+from dataclasses import dataclass
+from typing import Literal
+
+TriggerType = Literal[
+    "consecutive_again",
+    "consecutive_easy",
+    "high_lapse_rate",
+    "slow_response",
+    "cluster_failure_prereq",
+]
+
+@dataclass
+class EvolutionTrigger:
+    type: TriggerType
+    card_id: str
+    note_id: str
+    deck_id: str
+    user_id: str
+    metrics: dict
+
+def detect_card_triggers(card, review_stats, cluster_stats) -> list[EvolutionTrigger]:
+    out = []
+
+    if card.consecutive_again >= 3:
+        out.append(EvolutionTrigger(
+            type="consecutive_again",
+            card_id=card.id,
+            note_id=card.note_id,
+            deck_id=card.deck_id,
+            user_id=card.user_id,
+            metrics={"consecutive_again": card.consecutive_again},
+        ))
+
+    if card.consecutive_easy >= 5:
+        out.append(EvolutionTrigger(
+            type="consecutive_easy",
+            card_id=card.id,
+            note_id=card.note_id,
+            deck_id=card.deck_id,
+            user_id=card.user_id,
+            metrics={"consecutive_easy": card.consecutive_easy},
+        ))
+
+    if card.reps > 10 and review_stats.lapse_rate > 0.5:
+        out.append(EvolutionTrigger(
+            type="high_lapse_rate",
+            card_id=card.id,
+            note_id=card.note_id,
+            deck_id=card.deck_id,
+            user_id=card.user_id,
+            metrics={"lapse_rate": review_stats.lapse_rate, "reps": card.reps},
+        ))
+
+    if card.average_response_ms and card.average_response_ms > 15000:
+        out.append(EvolutionTrigger(
+            type="slow_response",
+            card_id=card.id,
+            note_id=card.note_id,
+            deck_id=card.deck_id,
+            user_id=card.user_id,
+            metrics={"average_response_ms": card.average_response_ms},
+        ))
+
+    if cluster_stats.failed_cards >= 3 and cluster_stats.failure_rate >= 0.6:
+        out.append(EvolutionTrigger(
+            type="cluster_failure_prereq",
+            card_id=card.id,
+            note_id=card.note_id,
+            deck_id=card.deck_id,
+            user_id=card.user_id,
+            metrics={
+                "cluster_key": cluster_stats.cluster_key,
+                "failed_cards": cluster_stats.failed_cards,
+                "failure_rate": cluster_stats.failure_rate,
+            },
+        ))
+
+    return out
+```
+
+建议把“相关卡片集体失败”定义为：
+- 同一 `cluster_key` 下，最近 48 小时或最近 20 次复习内
+- 至少 3 张不同卡片
+- `Again + Hard` 占比 >= 60%
+- `cluster_key` 由 `course_id + module_id + concept_tag` 构成
+
+**3. PostgreSQL 表设计**
+在你现有基础表上扩展以下字段。
+
+```sql
+ALTER TABLE flashcard_notes
+ADD COLUMN deck_id UUID NOT NULL REFERENCES flashcard_decks(id) ON DELETE CASCADE,
+ADD COLUMN canonical_question TEXT,
+ADD COLUMN canonical_answer TEXT,
+ADD COLUMN hint TEXT,
+ADD COLUMN prerequisite_refs JSONB DEFAULT '[]'::jsonb,
+ADD COLUMN evolution_parent_note_id UUID NULL REFERENCES flashcard_notes(id),
+ADD COLUMN merged_into_note_id UUID NULL REFERENCES flashcard_notes(id),
+ADD COLUMN retired_at TIMESTAMPTZ NULL,
+ADD COLUMN content_hash VARCHAR(64),
+ADD COLUMN cluster_key VARCHAR(128);
+
+CREATE INDEX idx_flashcard_notes_deck_id ON flashcard_notes(deck_id);
+CREATE INDEX idx_flashcard_notes_cluster_key ON flashcard_notes(cluster_key);
+CREATE INDEX idx_flashcard_notes_content_hash ON flashcard_notes(content_hash);
+
+ALTER TABLE flashcard_cards
+ADD COLUMN deck_id UUID NOT NULL REFERENCES flashcard_decks(id) ON DELETE CASCADE,
+ADD COLUMN user_id UUID NOT NULL REFERENCES users(id),
+ADD COLUMN avg_response_ms INT,
+ADD COLUMN cluster_key VARCHAR(128),
+ADD COLUMN last_triggered_at TIMESTAMPTZ,
+ADD COLUMN evolution_lock BOOLEAN DEFAULT FALSE;
+
+CREATE INDEX idx_flashcard_cards_note_id ON flashcard_cards(note_id);
+CREATE INDEX idx_flashcard_cards_deck_due ON flashcard_cards(deck_id, due);
+CREATE INDEX idx_flashcard_cards_cluster_key ON flashcard_cards(cluster_key);
+
+CREATE TABLE evolution_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id),
+    deck_id UUID NOT NULL REFERENCES flashcard_decks(id) ON DELETE CASCADE,
+    card_id UUID NULL REFERENCES flashcard_cards(id) ON DELETE SET NULL,
+    note_id UUID NULL REFERENCES flashcard_notes(id) ON DELETE SET NULL,
+    trigger_type VARCHAR(40) NOT NULL,
+    trigger_metrics JSONB NOT NULL,
+    source_snapshot JSONB NOT NULL,
+    llm_request JSONB,
+    llm_response JSONB,
+    proposal JSONB,
+    qc_report JSONB,
+    review_status VARCHAR(30) NOT NULL DEFAULT 'pending_llm',
+    apply_status VARCHAR(30) NOT NULL DEFAULT 'not_applied',
+    reviewer_id UUID NULL REFERENCES users(id),
+    reviewed_at TIMESTAMPTZ NULL,
+    applied_at TIMESTAMPTZ NULL,
+    rejected_reason TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_evolution_logs_user_created ON evolution_logs(user_id, created_at DESC);
+CREATE INDEX idx_evolution_logs_deck_status ON evolution_logs(deck_id, review_status, created_at DESC);
+CREATE INDEX idx_evolution_logs_card_note ON evolution_logs(card_id, note_id);
+```
+
+`proposal` 建议存统一结构：
+```json
+{
+  "action": "split|retire|merge|rewrite|add_hint|add_prerequisite",
+  "title": "建议标题",
+  "reason": "原因",
+  "new_notes": [],
+  "rewrite_fields": null,
+  "hint": null,
+  "merge_target_note_id": null,
+  "prerequisite_notes": [],
+  "confidence": 0.82
+}
+```
+
+**4. 后端目录结构**
+```text
+backend/
+  app/
+    main.py
+    api/v1/
+      flashcard_review.py
+      evolutions.py
+    core/
+      config.py
+      db.py
+      queue.py
+    models/
+      flashcard_note.py
+      flashcard_card.py
+      review_log.py
+      evolution_log.py
+    repositories/
+      flashcard_repo.py
+      review_repo.py
+      evolution_repo.py
+    schemas/
+      review.py
+      evolution.py
+    services/
+      fsrs_service.py
+      evolution/
+        trigger_detector.py
+        prompt_factory.py
+        claude_client.py
+        evolution_engine.py
+        quality_guard.py
+        dedupe.py
+        rpkt.py
+        apply_service.py
+    workers/
+      evolution_worker.py
+```
+
+**5. Claude Structured Output 方案**
+推荐用“单工具强制调用”模式，让 Claude 只能返回符合 JSON Schema 的结构。
+
+```python
+# app/schemas/evolution.py
+from pydantic import BaseModel, Field
+from typing import Literal
+
+class NewNote(BaseModel):
+    front: str = Field(min_length=3, max_length=200)
+    back: str = Field(min_length=1, max_length=300)
+    hint: str | None = Field(default=None, max_length=120)
+    note_type: Literal["basic", "cloze"] = "basic"
+    prerequisite_for: str | None = None
+
+class EvolutionProposal(BaseModel):
+    action: Literal["split", "retire", "merge", "rewrite", "add_hint", "add_prerequisite"]
+    reason: str = Field(min_length=5, max_length=300)
+    confidence: float = Field(ge=0, le=1)
+    new_notes: list[NewNote] = []
+    rewrite_fields: dict | None = None
+    hint: str | None = None
+    merge_target_note_id: str | None = None
+```
+
+```python
+# app/services/evolution/claude_client.py
+from anthropic import Anthropic
+from app.schemas.evolution import EvolutionProposal
+
+class ClaudeEvolutionClient:
+    def __init__(self, api_key: str, model: str):
+        self.client = Anthropic(api_key=api_key)
+        self.model = model
+
+    def generate(self, system_prompt: str, user_prompt: str) -> EvolutionProposal:
+        schema = EvolutionProposal.model_json_schema()
+        resp = self.client.messages.create(
+            model=self.model,
+            max_tokens=1200,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_prompt}],
+            tools=[{
+                "name": "submit_evolution",
+                "description": "Return one validated flashcard evolution proposal",
+                "input_schema": schema,
+            }],
+            tool_choice={"type": "tool", "name": "submit_evolution"},
+        )
+
+        tool_use = next(block for block in resp.content if block.type == "tool_use")
+        return EvolutionProposal.model_validate(tool_use.input)
+```
+
+**6. Prompt 设计**
+统一 system prompt：
+
+```text
+你是教育记忆工程师。目标是让闪卡更符合“最小信息原则”。
+约束：
+1. 不添加源材料中没有的新事实。
+2. 一个 basic 卡只保留一个可独立回忆的知识点。
+3. front 不要泄露完整答案。
+4. back 尽量短，优先关键词、定义、单一步骤。
+5. 如无法高质量修改，返回 retire 或低置信度。
+6. 输出必须符合 JSON Schema。
+```
+
+场景 1: `consecutiveAgain >= 3`，拆分子卡
+```text
+任务：原卡连续 3 次以上 Again，请拆成更简单的子卡。
+原卡：
+Q: {front}
+A: {back}
+上下文：{source_excerpt}
+
+示例
+输入:
+Q: TCP 三次握手的过程是什么？
+A: 客户端发送 SYN，服务端返回 SYN+ACK，客户端再返回 ACK，从而建立连接。
+输出:
+{"action":"split","reason":"原答案包含三个步骤，超出单卡最小单位","confidence":0.92,
+ "new_notes":[
+   {"front":"TCP 三次握手的第一步是什么？","back":"客户端发送 SYN"},
+   {"front":"TCP 三次握手的第二步是什么？","back":"服务端返回 SYN+ACK"},
+   {"front":"TCP 三次握手的第三步是什么？","back":"客户端返回 ACK"}
+ ]}
+```
+
+场景 2: `consecutiveEasy >= 5`，退役/合并
+```text
+任务：原卡连续 5 次 Easy。优先判断应退役，若与候选卡高度重合则合并。
+原卡：Q:{front} A:{back}
+候选近似卡：{similar_notes}
+
+示例
+输入:
+原卡: Q:HTTP 默认端口？ A:80
+候选卡: Q:HTTP 的默认端口号是多少？ A:80
+输出:
+{"action":"merge","reason":"与现有卡语义重复，仅保留一张即可","confidence":0.89,"merge_target_note_id":"note_xxx"}
+```
+
+场景 3: `lapseRate > 50% && reps > 10`，改写问法
+```text
+任务：这张卡长期高遗忘率，不要改知识点，只改提问方式。
+原卡：Q:{front} A:{back}
+失败样本：{recent_fail_logs}
+
+示例
+输入:
+Q: 什么是边际效用递减？
+A: 在其他条件不变时，连续增加某商品消费量，新增满足程度逐渐下降。
+输出:
+{"action":"rewrite","reason":"原问法过于抽象，改为定义型问法更稳定","confidence":0.86,
+ "rewrite_fields":{"front":"边际效用递减指的是什么现象？","back":"在其他条件不变时，连续增加某商品消费量，新增满足程度逐渐下降。"}}
+```
+
+场景 4: `avg_response_ms > 15000`，添加助记提示
+```text
+任务：卡片回答过慢，请补一个不直接泄题的提示。
+原卡：Q:{front} A:{back}
+
+示例
+输入:
+Q: 线粒体的主要功能是什么？
+A: 产生 ATP，提供细胞能量。
+输出:
+{"action":"add_hint","reason":"知识点能记起但提取慢，增加线索可缩短回忆时间","confidence":0.84,"hint":"提示：它常被称为细胞的‘能量工厂’。"}
+```
+
+场景 5: 相关卡片集体失败，补前置知识卡
+```text
+任务：同一知识簇多张卡片连续失败，请推断缺失的前置概念，并生成前置卡。
+失败卡组：{cluster_cards}
+候选前置概念：{prereq_candidates}
+
+示例
+输入:
+失败卡组:
+- Q: 求导链式法则怎么用？
+- Q: 复合函数求导公式是什么？
+候选前置概念: 导数定义, 复合函数定义, 函数嵌套关系
+输出:
+{"action":"add_prerequisite","reason":"学生更可能缺少复合函数定义而不是链式法则本身","confidence":0.88,
+ "new_notes":[{"front":"什么是复合函数？","back":"一个函数的输出作为另一个函数的输入所形成的函数。","prerequisite_for":"cluster_math_chain_rule"}]}
+```
+
+**7. 质量控制**
+`QualityGuard` 至少做 5 层：
+
+1. 最小信息原则
+```python
+def check_minimum_information(note) -> list[str]:
+    issues = []
+    if len(note["back"]) > 120:
+        issues.append("answer_too_long")
+    if any(x in note["back"] for x in ["、", "以及", "并且", "首先", "然后", "最后"]):
+        issues.append("possible_multi_fact")
+    if note["front"].count("和") >= 2:
+        issues.append("question_overloaded")
+    return issues
+```
+
+2. TF-IDF 去重  
+- 语料：`canonical_question + canonical_answer`
+- `cosine >= 0.82`：直接拦截
+- `0.72 <= cosine < 0.82`：标记 `duplicate_risk=high`，需人工确认
+- 可用 `scikit-learn TfidfVectorizer(ngram_range=(1,2))`
+
+3. 事实边界控制  
+只允许基于 `source_snapshot` 改写，不允许引入未提供事实；若 `source_snapshot` 不足，直接拒绝生成。
+
+4. 场景合法性  
+- `split` 至少 2 张子卡
+- `retire` 不能针对仍高 lapse 的卡
+- `merge` 必须指定已存在 `merge_target_note_id`
+- `add_hint` 不能包含答案全文
+- `add_prerequisite` 必须带 `prerequisite_for`
+
+5. 人工确认流程  
+状态机：
+`pending_llm -> pending_review -> approved/rejected -> applied`
+后台只自动生成，不自动应用；真正改库必须用户点击确认。
+
+**8. RPKT：前置知识递归追踪**
+这里建议实现为“知识图 + 轻量 BKT 状态”的混合方案。
+
+知识图来源：
+- `flashcard_notes.prerequisite_refs`：显式前置依赖
+- `cluster_key / tags / source_ref.module_id`：隐式聚类
+- 可选从课程大纲抽出的模块树
+
+每个概念维护 `p_know`：
+- 初始值可由该概念关联卡片的 FSRS 稳定度映射得到
+- 复习正确时按 BKT 更新
+- 复习错误时按 BKT 更新
+- 深度回溯时按边权衰减
+
+```python
+# app/services/evolution/rpkt.py
+def bkt_update(p_know: float, correct: bool, slip=0.1, guess=0.2, learn=0.15) -> float:
+    if correct:
+        post = (p_know * (1 - slip)) / (p_know * (1 - slip) + (1 - p_know) * guess)
+    else:
+        post = (p_know * slip) / (p_know * slip + (1 - p_know) * (1 - guess))
+    return post + (1 - post) * learn
+
+def trace_missing_prereqs(graph, failed_concepts: list[str], mastery: dict[str, float], max_depth=3):
+    scores = {}
+    queue = [(c, 0, 1.0) for c in failed_concepts]
+
+    while queue:
+        concept, depth, weight = queue.pop(0)
+        if depth >= max_depth:
+            continue
+        for prereq, edge_weight in graph.get(concept, []):
+            lack = 1 - mastery.get(prereq, 0.5)
+            score = lack * weight * edge_weight * (0.85 ** depth)
+            scores[prereq] = max(scores.get(prereq, 0), score)
+            queue.append((prereq, depth + 1, weight * edge_weight))
+
+    return sorted(scores.items(), key=lambda x: x[1], reverse=True)
+```
+
+触发流程：
+1. 找出失败簇里的概念节点
+2. 回溯 1~3 层前置图
+3. 选 `score > 0.45` 且当前没有对应卡片的前置概念
+4. 把这些概念喂给 Claude 生成“前置知识卡”
+
+**9. FastAPI 关键接口**
+```python
+# POST /api/v1/flashcards/review
+class ReviewSubmitReq(BaseModel):
+    card_id: str
+    rating: int
+    response_ms: int | None = None
+    reviewed_at: datetime
+
+class ReviewSubmitResp(BaseModel):
+    next_due: datetime
+    stability: float
+    difficulty: float
+    triggered_evolutions: list[str]
+
+@router.post("/flashcards/review", response_model=ReviewSubmitResp)
+async def submit_review(req: ReviewSubmitReq, user=Depends(get_user), db=Depends(get_db)):
+    card = repo.get_card_for_update(db, req.card_id, user.id)
+    fsrs_result = fsrs_service.review(card, req.rating, req.reviewed_at)
+    repo.save_review_and_card(db, card, fsrs_result, req.response_ms)
+
+    triggers = evolution_engine.detect_after_review(db, user.id, card.id)
+    evolution_ids = evolution_engine.enqueue(db, user.id, card.id, triggers)
+
+    return ReviewSubmitResp(
+        next_due=fsrs_result.due,
+        stability=fsrs_result.stability,
+        difficulty=fsrs_result.difficulty,
+        triggered_evolutions=evolution_ids,
+    )
+```
+
+```python
+# GET /api/v1/evolutions/suggestions
+@router.get("/evolutions/suggestions")
+async def list_suggestions(deck_id: str, status: str = "pending_review", db=Depends(get_db), user=Depends(get_user)):
+    return evolution_repo.list_by_deck(db, user.id, deck_id, status)
+```
+
+```python
+# POST /api/v1/evolutions/{id}/apply
+@router.post("/evolutions/{evolution_id}/apply")
+async def apply_suggestion(evolution_id: str, db=Depends(get_db), user=Depends(get_user)):
+    evo = evolution_repo.get_for_update(db, evolution_id, user.id)
+    apply_service.apply(db, evo, reviewer_id=user.id)
+    db.commit()
+    return {"ok": True}
+```
+
+**10. 进化执行逻辑**
+```python
+# app/services/evolution/apply_service.py
+def apply(db, evo, reviewer_id: str):
+    proposal = evo.proposal
+    action = proposal["action"]
+
+    if action == "split":
+        retire_original_card(db, evo.card_id)
+        for n in proposal["new_notes"]:
+            note_id = create_note(db, evo.deck_id, n, parent_note_id=evo.note_id)
+            create_card(db, evo.deck_id, note_id, user_id=evo.user_id)
+
+    elif action == "retire":
+        retire_original_card(db, evo.card_id)
+
+    elif action == "merge":
+        retire_original_card(db, evo.card_id)
+        mark_note_merged(db, evo.note_id, proposal["merge_target_note_id"])
+
+    elif action == "rewrite":
+        update_note_fields(db, evo.note_id, proposal["rewrite_fields"])
+
+    elif action == "add_hint":
+        update_note_hint(db, evo.note_id, proposal["hint"])
+
+    elif action == "add_prerequisite":
+        for n in proposal["new_notes"]:
+            note_id = create_note(db, evo.deck_id, n, parent_note_id=evo.note_id)
+            create_card(db, evo.deck_id, note_id, user_id=evo.user_id)
+
+    mark_evolution_applied(db, evo.id, reviewer_id)
+```
+
+**11. 前端：React + TypeScript 预览组件**
+```ts
+export type EvolutionAction =
+  | 'split'
+  | 'retire'
+  | 'merge'
+  | 'rewrite'
+  | 'add_hint'
+  | 'add_prerequisite'
+
+export interface EvolutionSuggestion {
+  id: string
+  triggerType: string
+  triggerMetrics: Record<string, number | string>
+  reviewStatus: 'pending_review' | 'approved' | 'rejected' | 'applied'
+  proposal: {
+    action: EvolutionAction
+    reason: string
+    confidence: number
+    new_notes?: Array<{ front: string; back: string; hint?: string }>
+    rewrite_fields?: { front: string; back: string }
+    hint?: string
+    merge_target_note_id?: string
+  }
+  qcReport: {
+    duplicateRisk: 'low' | 'medium' | 'high'
+    minimumInfoIssues: string[]
+  }
+  sourceSnapshot: {
+    front: string
+    back: string
+    hint?: string
+  }
+}
+```
+
+```tsx
+export function EvolutionPreviewCard({
+  suggestion,
+  onApprove,
+  onReject,
+}: {
+  suggestion: EvolutionSuggestion
+  onApprove: (id: string) => void
+  onReject: (id: string) => void
+}) {
+  const p = suggestion.proposal
+  return (
+    <section className="rounded-2xl border bg-white p-4 shadow-sm">
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="text-sm font-semibold">进化建议</h3>
+        <span className="text-xs text-slate-500">
+          置信度 {Math.round(p.confidence * 100)}%
+        </span>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2">
+        <div className="rounded-xl bg-slate-50 p-3">
+          <div className="text-xs text-slate-500">原卡</div>
+          <div className="mt-2 text-sm font-medium">{suggestion.sourceSnapshot.front}</div>
+          <div className="mt-1 text-sm text-slate-700">{suggestion.sourceSnapshot.back}</div>
+        </div>
+
+        <div className="rounded-xl bg-amber-50 p-3">
+          <div className="text-xs text-slate-500">建议</div>
+          <div className="mt-2 text-sm font-medium">{p.action}</div>
+          <div className="mt-1 text-sm text-slate-700">{p.reason}</div>
+          {p.rewrite_fields && <div className="mt-2 text-sm">{p.rewrite_fields.front}</div>}
+          {p.hint && <div className="mt-2 text-sm">提示：{p.hint}</div>}
+          {p.new_notes?.map((n, i) => (
+            <div key={i} className="mt-2 rounded-lg border bg-white p-2 text-sm">
+              <div>{n.front}</div>
+              <div className="text-slate-600">{n.back}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-3 text-xs text-slate-500">
+        去重风险：{suggestion.qcReport.duplicateRisk}，
+        最小信息问题：{suggestion.qcReport.minimumInfoIssues.join(', ') || '无'}
+      </div>
+
+      <div className="mt-4 flex gap-2">
+        <button className="rounded-lg bg-slate-900 px-3 py-2 text-white" onClick={() => onApprove(suggestion.id)}>
+          应用
+        </button>
+        <button className="rounded-lg border px-3 py-2" onClick={() => onReject(suggestion.id)}>
+          拒绝
+        </button>
+      </div>
+    </section>
+  )
+}
+```
+
+**12. 实施建议**
+第一阶段先做 4 个低风险动作：`split / retire / rewrite / add_hint`。  
+第二阶段再加 `merge` 和 `RPKT 前置卡`，因为这两类最依赖图结构和去重精度。  
+真正上线时，建议默认“全部人工确认”，等你积累 2~4 周日志后，再考虑对白名单场景开放自动应用。
+
+如果你要，我下一步可以直接把这套方案进一步展开成：
+1. 可运行的 FastAPI 文件骨架  
+2. SQLAlchemy ORM 模型  
+3. 完整的 `evolutions.py` 路由代码  
+4. 前端 API hooks 和页面集成代码
