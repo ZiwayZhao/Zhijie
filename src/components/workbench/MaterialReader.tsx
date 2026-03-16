@@ -1,4 +1,4 @@
-import { useMemo, lazy, Suspense } from 'react'
+import { useMemo, useState, lazy, Suspense } from 'react'
 import { motion } from 'framer-motion'
 import { FileText, Calendar, User, BookOpen, Loader2 } from 'lucide-react'
 
@@ -11,32 +11,52 @@ import type { Material } from '@/mocks/materials'
 import { materialContent } from '@/mocks/materials'
 import { getCourseById } from '@/mocks/courses'
 
+/* ---------- Types ---------- */
+
 interface MaterialReaderProps {
   material: Material
+  specialistMarkdown?: string | null
+  activeTab?: string
+  onTabChange?: (tab: string) => void
 }
 
-/** Fix common markdown issues (ported from science1204) */
+/* ---------- Tabs ---------- */
+
+interface TabDef {
+  key: string
+  label: string
+  available: boolean
+}
+
+/* ---------- Markdown fixer ---------- */
+
 function fixMarkdown(md: string): string {
   let fixed = md
-  // Fix LaTeX pipes
   fixed = fixed.replace(/(\$\$[\s\S]*?\$\$)|(\$[^$\n]*?\$)/g, (match) => {
     if (match.indexOf('|') === -1) return match
     return match.replace(/\|/g, '\\vert')
   })
-  // Unwrap bolded headers
   fixed = fixed.replace(/^\s*\*\*\s*(#{1,6})\s*(.*?)\*\*\s*$/gm, '$1 $2')
-  // Remove duplicate hashes
   fixed = fixed.replace(/(^|\n)(#{1,6})\s+(?:#+\s+)+/g, '$1$2 ')
-  // Ensure space after # (only when no space exists, e.g. #Title → # Title)
   fixed = fixed.replace(/^(#{1,6})(?=[^# \n])/gm, '$1 ')
   return fixed
 }
 
-export default function MaterialReader({ material }: MaterialReaderProps) {
+/* ---------- Main Component ---------- */
+
+export default function MaterialReader({
+  material,
+  specialistMarkdown,
+  activeTab: controlledTab,
+  onTabChange,
+}: MaterialReaderProps) {
+  const [internalTab, setInternalTab] = useState('original')
+  const activeTab = controlledTab ?? internalTab
+  const setActiveTab = onTabChange ?? setInternalTab
+
   const course = getCourseById(material.courseId)
   const isPdf = material.fileType === 'application/pdf'
 
-  // Build PDF blob URL from base64 data
   const pdfUrl = useMemo(() => {
     if (!isPdf || !material.fileData) return null
     try {
@@ -52,10 +72,15 @@ export default function MaterialReader({ material }: MaterialReaderProps) {
     }
   }, [isPdf, material.fileData])
 
-  // Determine content to render
-  const content = material.fileData && !isPdf
+  const originalContent = material.fileData && !isPdf
     ? material.fileData
-    : materialContent // fallback to mock for static materials
+    : materialContent
+
+  const tabs: TabDef[] = [
+    { key: 'original', label: '原文', available: true },
+    { key: 'specialist', label: 'AI 精讲', available: !!specialistMarkdown },
+    { key: 'exam-points', label: '考点', available: false },
+  ]
 
   return (
     <motion.article
@@ -65,65 +90,151 @@ export default function MaterialReader({ material }: MaterialReaderProps) {
       className="space-y-6"
     >
       {/* Material header */}
-      <header className="border-b border-border-warm pb-6">
-        <h1 className="font-heading text-3xl text-text-main leading-snug">
-          {material.name}
-        </h1>
-        <div className="flex flex-wrap items-center gap-4 mt-4 text-sm text-text-muted">
-          <span className="flex items-center gap-1.5">
-            <User size={14} strokeWidth={1.5} />
-            {material.uploader}
-          </span>
-          <span className="flex items-center gap-1.5">
-            <Calendar size={14} strokeWidth={1.5} />
-            {material.uploadTime}
-          </span>
-          <span className="flex items-center gap-1.5">
-            <FileText size={14} strokeWidth={1.5} />
-            {material.fileSize}
-          </span>
-          {course && (
-            <span className="flex items-center gap-1.5">
-              <BookOpen size={14} strokeWidth={1.5} />
-              {course.name} — {course.school}
-            </span>
-          )}
-        </div>
-        <div className="flex gap-2 mt-3">
-          <span className="px-2.5 py-0.5 text-xs border border-red-primary text-red-primary rounded-sm">
-            {material.type}
-          </span>
-        </div>
-      </header>
+      <MaterialHeader material={material} course={course} />
 
-      {/* Content area */}
-      {isPdf && pdfUrl ? (
-        <Suspense
-          fallback={
-            <div className="flex items-center justify-center h-[80vh] gap-2 text-text-muted">
-              <Loader2 size={20} className="animate-spin" />
-              <span className="text-sm">加载 PDF 阅读器...</span>
-            </div>
-          }
-        >
-          <PdfAnnotator pdfUrl={pdfUrl} materialId={material.id} />
-        </Suspense>
-      ) : (
+      {/* Tab bar */}
+      <TabBar tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />
+
+      {/* Tab content */}
+      {activeTab === 'original' && (
+        <OriginalContent isPdf={isPdf} pdfUrl={pdfUrl} material={material} content={originalContent} />
+      )}
+      {activeTab === 'specialist' && specialistMarkdown && (
         <div className="prose-academic">
           <ReactMarkdown
             remarkPlugins={[remarkMath, remarkGfm]}
             rehypePlugins={[rehypeKatex]}
             components={mdComponents}
           >
-            {fixMarkdown(content)}
+            {fixMarkdown(specialistMarkdown)}
           </ReactMarkdown>
+        </div>
+      )}
+      {activeTab === 'exam-points' && (
+        <div className="py-12 text-center text-text-muted text-sm">
+          考点提取功能即将上线
         </div>
       )}
     </motion.article>
   )
 }
 
-/** Custom markdown component styles matching editorial academic design */
+/* ---------- Sub-components ---------- */
+
+function MaterialHeader({
+  material,
+  course,
+}: {
+  material: Material
+  course: ReturnType<typeof getCourseById>
+}) {
+  return (
+    <header className="border-b border-border-warm pb-6">
+      <h1 className="font-heading text-3xl text-text-main leading-snug">
+        {material.name}
+      </h1>
+      <div className="flex flex-wrap items-center gap-4 mt-4 text-sm text-text-muted">
+        <span className="flex items-center gap-1.5">
+          <User size={14} strokeWidth={1.5} />
+          {material.uploader}
+        </span>
+        <span className="flex items-center gap-1.5">
+          <Calendar size={14} strokeWidth={1.5} />
+          {material.uploadTime}
+        </span>
+        <span className="flex items-center gap-1.5">
+          <FileText size={14} strokeWidth={1.5} />
+          {material.fileSize}
+        </span>
+        {course && (
+          <span className="flex items-center gap-1.5">
+            <BookOpen size={14} strokeWidth={1.5} />
+            {course.name} — {course.school}
+          </span>
+        )}
+      </div>
+      <div className="flex gap-2 mt-3">
+        <span className="px-2.5 py-0.5 text-xs border border-red-primary text-red-primary rounded-sm">
+          {material.type}
+        </span>
+      </div>
+    </header>
+  )
+}
+
+function TabBar({
+  tabs,
+  activeTab,
+  onTabChange,
+}: {
+  tabs: TabDef[]
+  activeTab: string
+  onTabChange: (key: string) => void
+}) {
+  return (
+    <div className="flex gap-0 border-b border-border-warm">
+      {tabs.map((tab) => (
+        <button
+          key={tab.key}
+          onClick={() => tab.available && onTabChange(tab.key)}
+          disabled={!tab.available}
+          className={[
+            'px-4 py-2.5 text-sm font-medium transition-colors relative -mb-px',
+            activeTab === tab.key
+              ? 'text-red-primary border-b-2 border-b-red-primary'
+              : tab.available
+                ? 'text-text-muted hover:text-text-body'
+                : 'text-text-muted/40 cursor-not-allowed',
+          ].join(' ')}
+        >
+          {tab.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function OriginalContent({
+  isPdf,
+  pdfUrl,
+  material,
+  content,
+}: {
+  isPdf: boolean
+  pdfUrl: string | null
+  material: Material
+  content: string
+}) {
+  if (isPdf && pdfUrl) {
+    return (
+      <Suspense
+        fallback={
+          <div className="flex items-center justify-center h-[80vh] gap-2 text-text-muted">
+            <Loader2 size={20} className="animate-spin" />
+            <span className="text-sm">加载 PDF 阅读器...</span>
+          </div>
+        }
+      >
+        <PdfAnnotator pdfUrl={pdfUrl} materialId={material.id} />
+      </Suspense>
+    )
+  }
+
+  return (
+    <div className="prose-academic">
+      <ReactMarkdown
+        remarkPlugins={[remarkMath, remarkGfm]}
+        rehypePlugins={[rehypeKatex]}
+        components={mdComponents}
+      >
+        {fixMarkdown(content)}
+      </ReactMarkdown>
+    </div>
+  )
+}
+
+/* ---------- Markdown components ---------- */
+
 const mdComponents = {
   h1: ({ children, ...props }: React.ComponentPropsWithoutRef<'h1'>) => (
     <h1 className="font-heading text-2xl text-text-main mt-8 mb-4 pb-2 border-b border-border-warm" {...props}>

@@ -1,3 +1,4 @@
+import { useState, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { ArrowLeft } from 'lucide-react'
@@ -12,6 +13,14 @@ export default function WorkbenchPage() {
   const material = mid ? getMaterialById(mid) : undefined
   const course = courseId ? getCourseById(courseId) : undefined
   const courseMaterials = courseId ? getMaterialsByCourse(courseId) : []
+
+  const [specialistMarkdown, setSpecialistMarkdown] = useState<string | null>(null)
+  const [activeTab, setActiveTab] = useState('original')
+
+  const handleModuleSelect = useCallback((_moduleId: string, markdown: string) => {
+    setSpecialistMarkdown(markdown)
+    setActiveTab('specialist')
+  }, [])
 
   if (!material || !course) {
     return (
@@ -56,7 +65,12 @@ export default function WorkbenchPage() {
           <span className="text-text-main">{material.name}</span>
         </nav>
 
-        <MaterialReader material={material} />
+        <MaterialReader
+          material={material}
+          specialistMarkdown={specialistMarkdown}
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+        />
 
         <RelatedMaterials
           materials={courseMaterials}
@@ -74,7 +88,10 @@ export default function WorkbenchPage() {
                    lg:sticky lg:top-0 lg:h-screen lg:overflow-y-auto
                    max-lg:border-t max-lg:border-l-0"
       >
-        <AIToolPanel />
+        <AIToolPanel
+          materialId={material.id}
+          onModuleSelect={handleModuleSelect}
+        />
       </motion.aside>
     </div>
   )

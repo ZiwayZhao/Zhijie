@@ -8,6 +8,7 @@ const pageTitles: Record<string, string> = {
   '/my/courses': '我的课程',
   '/my/materials': '我的材料',
   '/my/notes': '我的笔记',
+  '/my/flashcards': '我的闪卡',
   '/settings': '设置',
 }
 

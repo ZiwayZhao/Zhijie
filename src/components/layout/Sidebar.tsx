@@ -6,6 +6,7 @@ import {
   BookOpen,
   FileText,
   StickyNote,
+  Brain,
   Settings,
 } from 'lucide-react'
 
@@ -16,6 +17,7 @@ const navItems = [
   { to: '/my/courses', label: '我的课程', icon: BookOpen },
   { to: '/my/materials', label: '我的材料', icon: FileText },
   { to: '/my/notes', label: '我的笔记', icon: StickyNote },
+  { to: '/my/flashcards', label: '我的闪卡', icon: Brain },
 ]
 
 export default function Sidebar() {
