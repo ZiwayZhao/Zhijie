@@ -51,9 +51,9 @@ const actionLabels: Record<string, string> = {
 }
 
 const priorityColors: Record<string, string> = {
-  high: '#A5192E',
-  medium: '#C49A2A',
-  low: '#8A8A8A',
+  high: 'var(--color-red-primary)',
+  medium: 'var(--color-accent-gold)',
+  low: 'var(--color-text-muted)',
 }
 
 const priorityLabels: Record<string, string> = {

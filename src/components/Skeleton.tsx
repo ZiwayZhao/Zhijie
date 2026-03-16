@@ -8,7 +8,7 @@ export function Skeleton({ className = '' }: SkeletonProps) {
       className={`animate-pulse rounded-md bg-bg-accent ${className}`}
       style={{
         backgroundImage:
-          'linear-gradient(90deg, transparent, rgba(196, 154, 42, 0.08), transparent)',
+          'linear-gradient(90deg, transparent, color-mix(in srgb, var(--color-accent-gold) 8%, transparent), transparent)',
         backgroundSize: '200% 100%',
         animation: 'shimmer 1.5s ease-in-out infinite',
       }}

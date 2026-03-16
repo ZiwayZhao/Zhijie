@@ -129,34 +129,38 @@ function MaterialHeader({
   course: ReturnType<typeof getCourseById>
 }) {
   return (
-    <header className="border-b border-border-warm pb-6">
+    <header className="border-b border-border-warm pb-8">
+      {/* Type badge */}
+      <span className="inline-block px-2.5 py-0.5 text-[11px] border border-red-primary text-red-primary mb-3">
+        {material.type}
+      </span>
+
       <h1 className="font-heading text-3xl text-text-main leading-snug">
         {material.name}
       </h1>
-      <div className="flex flex-wrap items-center gap-4 mt-4 text-sm text-text-muted">
+
+      {/* Thin red accent */}
+      <div className="w-10 h-px bg-red-primary mt-3 mb-4" />
+
+      <div className="flex flex-wrap items-center gap-4 text-sm text-text-muted">
         <span className="flex items-center gap-1.5">
-          <User size={14} strokeWidth={1.5} />
+          <User size={13} strokeWidth={1.5} className="text-red-primary" />
           {material.uploader}
         </span>
         <span className="flex items-center gap-1.5">
-          <Calendar size={14} strokeWidth={1.5} />
+          <Calendar size={13} strokeWidth={1.5} />
           {material.uploadTime}
         </span>
         <span className="flex items-center gap-1.5">
-          <FileText size={14} strokeWidth={1.5} />
+          <FileText size={13} strokeWidth={1.5} />
           {material.fileSize}
         </span>
         {course && (
-          <span className="flex items-center gap-1.5">
-            <BookOpen size={14} strokeWidth={1.5} />
+          <span className="flex items-center gap-1.5 italic">
+            <BookOpen size={13} strokeWidth={1.5} />
             {course.name} — {course.school}
           </span>
         )}
-      </div>
-      <div className="flex gap-2 mt-3">
-        <span className="px-2.5 py-0.5 text-xs border border-red-primary text-red-primary rounded-sm">
-          {material.type}
-        </span>
       </div>
     </header>
   )
@@ -172,25 +176,25 @@ function TabBar({
   onTabChange: (key: string) => void
 }) {
   return (
-    <div className="flex gap-0 border-b border-border-warm">
+    <nav className="flex gap-0 border-b border-border-warm">
       {tabs.map((tab) => (
         <button
           key={tab.key}
           onClick={() => tab.available && onTabChange(tab.key)}
           disabled={!tab.available}
           className={[
-            'px-4 py-2.5 text-sm font-medium transition-colors relative -mb-px',
+            'px-5 py-2.5 text-sm transition-colors relative -mb-px font-body',
             activeTab === tab.key
-              ? 'text-red-primary border-b-2 border-b-red-primary'
+              ? 'text-red-primary border-b-2 border-b-red-primary font-medium'
               : tab.available
-                ? 'text-text-muted hover:text-text-body'
-                : 'text-text-muted/40 cursor-not-allowed',
+                ? 'text-text-muted hover:text-text-body border-b-2 border-transparent'
+                : 'text-text-muted/40 cursor-not-allowed border-b-2 border-transparent',
           ].join(' ')}
         >
           {tab.label}
         </button>
       ))}
-    </div>
+    </nav>
   )
 }
 

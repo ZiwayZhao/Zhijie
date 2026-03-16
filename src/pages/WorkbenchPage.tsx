@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { ArrowLeft, MessageCircle } from 'lucide-react'
+import { ArrowLeft, MessageCircle, BookOpen } from 'lucide-react'
 import { getMaterialById, getMaterialsByCourse } from '@/mocks/materials'
 import { getCourseById } from '@/mocks/courses'
 import MaterialReader from '@/components/workbench/MaterialReader'
@@ -29,7 +29,7 @@ export default function WorkbenchPage() {
 
   if (!material || !course) {
     return (
-      <div className="p-8">
+      <div className="p-8 lg:p-10">
         <h1 className="font-heading text-2xl text-text-main">材料未找到</h1>
         <p className="text-text-muted mt-2">
           无法找到对应的学习材料。
@@ -47,27 +47,27 @@ export default function WorkbenchPage() {
 
   return (
     <div className="flex flex-col lg:flex-row min-h-0">
-      {/* 70% Left — Material reader */}
+      {/* 70% Left — Material reader (journal page) */}
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.35 }}
-        className="flex-[7] min-w-0 p-6 lg:p-8 overflow-y-auto"
+        className="flex-[7] min-w-0 p-6 lg:py-10 lg:px-12 overflow-y-auto"
       >
-        {/* Breadcrumb */}
-        <nav className="flex items-center gap-1.5 text-sm text-text-muted mb-6">
+        {/* Breadcrumb — editorial navigation */}
+        <nav className="flex items-center gap-1.5 text-xs text-text-muted mb-8">
           <Link to="/" className="hover:text-text-body transition-colors no-underline text-text-muted">
             首页
           </Link>
-          <span>/</span>
+          <span className="text-border-warm">/</span>
           <Link
             to={`/course/${courseId}`}
             className="hover:text-text-body transition-colors no-underline text-text-muted"
           >
             {course.name}
           </Link>
-          <span>/</span>
-          <span className="text-text-main">{material.name}</span>
+          <span className="text-border-warm">/</span>
+          <span className="text-text-body">{material.name}</span>
         </nav>
 
         <MaterialReader
@@ -77,9 +77,14 @@ export default function WorkbenchPage() {
           onTabChange={setActiveTab}
         />
 
-        {/* Socratic dialogue toggle */}
+        {/* Socratic dialogue toggle — elegant editorial style */}
         {specialistMarkdown && currentModuleId && (
-          <div className="mt-6">
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2, duration: 0.3 }}
+            className="mt-8"
+          >
             {showSocratic ? (
               <SocraticChat
                 moduleId={currentModuleId}
@@ -90,13 +95,25 @@ export default function WorkbenchPage() {
             ) : (
               <button
                 onClick={() => setShowSocratic(true)}
-                className="flex items-center gap-2 px-4 py-2.5 border border-border-warm rounded-lg text-sm text-text-muted hover:border-red-primary hover:text-red-primary transition-colors"
+                className="group flex items-center gap-3 w-full py-4 px-5 border border-border-warm rounded-sm
+                           bg-bg-card hover:border-red-primary transition-colors text-left"
               >
-                <MessageCircle size={16} strokeWidth={1.5} />
-                开启苏格拉底对话
+                <div className="w-8 h-8 flex items-center justify-center border border-border-warm
+                                group-hover:border-red-primary transition-colors">
+                  <MessageCircle size={15} strokeWidth={1.5} className="text-text-muted group-hover:text-red-primary transition-colors" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-text-main group-hover:text-red-primary transition-colors">
+                    开启苏格拉底对话
+                  </p>
+                  <p className="text-xs text-text-muted mt-0.5">
+                    通过提问引导深入理解概念
+                  </p>
+                </div>
+                <BookOpen size={14} strokeWidth={1.5} className="ml-auto text-border-warm group-hover:text-red-primary transition-colors" />
               </button>
             )}
-          </div>
+          </motion.div>
         )}
 
         <RelatedMaterials
@@ -106,7 +123,7 @@ export default function WorkbenchPage() {
         />
       </motion.div>
 
-      {/* 30% Right — AI tool panel (sticky) */}
+      {/* 30% Right — AI tool panel (sticky sidebar with journal gutter feel) */}
       <motion.aside
         initial={{ opacity: 0, x: 16 }}
         animate={{ opacity: 1, x: 0 }}

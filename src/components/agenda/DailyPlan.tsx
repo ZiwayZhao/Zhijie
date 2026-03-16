@@ -43,15 +43,15 @@ export default function DailyPlan({ agenda, onToggleComplete, onAddTodo }: Daily
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.35, delay: 0.1 }}
-      className="border border-border-warm border-l-3 border-l-red-primary rounded-lg bg-bg-card"
+      className="border border-border-warm border-l-[3px] border-l-red-primary rounded-md bg-bg-card"
     >
-      {/* Header */}
-      <div className="flex items-center justify-between px-5 pt-5 pb-3">
-        <div className="flex items-center gap-2">
-          <CalendarDays size={18} strokeWidth={1.5} className="text-red-primary" />
-          <h3 className="font-heading text-lg text-text-main">今日学习计划</h3>
+      {/* Header — reading-list style */}
+      <div className="flex items-center justify-between px-6 pt-6 pb-3">
+        <div className="flex items-center gap-2.5">
+          <CalendarDays size={16} strokeWidth={1.5} className="text-red-primary" />
+          <h3 className="font-heading text-lg text-text-main tracking-tight">今日学习计划</h3>
         </div>
-        <span className="text-xs text-text-muted">
+        <span className="text-[11px] text-text-muted font-body tracking-wide">
           {activeItems.length > 0
             ? `${activeItems.length} 项 · 约 ${agenda.totalMinutes} 分钟`
             : '暂无任务'}
@@ -59,7 +59,7 @@ export default function DailyPlan({ agenda, onToggleComplete, onAddTodo }: Daily
       </div>
 
       {/* Active items */}
-      <div className="px-5">
+      <div className="px-6">
         {activeItems.length > 0 ? (
           activeItems.map((item, i) => (
             <AgendaItem
@@ -70,16 +70,16 @@ export default function DailyPlan({ agenda, onToggleComplete, onAddTodo }: Daily
             />
           ))
         ) : (
-          <p className="text-sm text-text-muted py-6 text-center">
+          <p className="text-sm text-text-muted py-8 text-center font-body">
             今天没有待完成的学习任务
           </p>
         )}
       </div>
 
-      {/* Completed items (collapsed) */}
+      {/* Completed items */}
       {completedItems.length > 0 && (
-        <div className="px-5 pt-2 pb-1 border-t border-border-warm mt-1">
-          <p className="text-xs text-text-muted mb-1">
+        <div className="px-6 pt-3 pb-1 border-t border-border-warm mt-1">
+          <p className="text-[11px] text-text-muted mb-1 font-body tracking-wide">
             已完成 ({completedItems.length})
           </p>
           {completedItems.map((item, i) => (
@@ -94,7 +94,7 @@ export default function DailyPlan({ agenda, onToggleComplete, onAddTodo }: Daily
       )}
 
       {/* Add todo input */}
-      <div className="flex items-center gap-2 px-5 py-3 border-t border-border-warm">
+      <div className="flex items-center gap-2.5 px-6 py-3.5 border-t border-border-warm">
         <Plus size={14} strokeWidth={1.5} className="text-text-muted shrink-0" />
         <input
           type="text"
@@ -102,12 +102,12 @@ export default function DailyPlan({ agenda, onToggleComplete, onAddTodo }: Daily
           onChange={(e) => setNewTodo(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="添加学习任务..."
-          className="flex-1 text-sm bg-transparent border-none outline-none text-text-body placeholder:text-text-muted/60"
+          className="flex-1 text-sm bg-transparent border-none outline-none text-text-body placeholder:text-text-muted/60 font-body"
         />
         {newTodo.trim() && (
           <button
             onClick={handleAddTodo}
-            className="text-xs text-red-primary hover:text-red-dark transition-colors"
+            className="text-xs text-red-primary hover:text-red-dark transition-colors duration-150 font-body"
           >
             添加
           </button>

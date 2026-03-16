@@ -89,7 +89,7 @@ export default function AgendaItem({ item, index, onToggleComplete }: AgendaItem
   const isTodo = item.type === 'todo'
 
   const content = (
-    <div className={`flex items-start gap-3 py-3 ${isCompleted ? 'opacity-50' : ''}`}>
+    <div className={`flex items-start gap-3 py-3 ${isCompleted ? 'opacity-40' : ''}`}>
       {/* Left dot / checkbox */}
       {isTodo ? (
         <button
@@ -98,38 +98,38 @@ export default function AgendaItem({ item, index, onToggleComplete }: AgendaItem
             e.stopPropagation()
             onToggleComplete?.(item.id)
           }}
-          className="mt-0.5 shrink-0 text-text-muted hover:text-red-primary transition-colors"
+          className="mt-0.5 shrink-0 text-text-muted hover:text-red-primary transition-colors duration-150"
         >
           {isCompleted
-            ? <CheckSquare size={18} strokeWidth={1.5} />
-            : <Square size={18} strokeWidth={1.5} />
+            ? <CheckSquare size={16} strokeWidth={1.5} />
+            : <Square size={16} strokeWidth={1.5} />
           }
         </button>
       ) : (
-        <div className={`w-2.5 h-2.5 rounded-full ${config.dotColor} mt-1.5 shrink-0`} />
+        <div className={`w-2 h-2 rounded-full ${config.dotColor} mt-1.5 shrink-0`} />
       )}
 
       {/* Content */}
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <Icon size={14} strokeWidth={1.5} className="text-text-muted shrink-0" />
-          <p className={`text-sm text-text-body leading-snug ${isCompleted ? 'line-through' : ''}`}>
+          <Icon size={13} strokeWidth={1.5} className="text-text-muted shrink-0" />
+          <p className={`text-sm text-text-body leading-snug font-body ${isCompleted ? 'line-through' : ''}`}>
             {title}
           </p>
         </div>
         {subtext && (
-          <p className="text-xs text-text-muted mt-0.5 ml-[22px]">{subtext}</p>
+          <p className="text-[11px] text-text-muted mt-0.5 ml-[21px] font-body">{subtext}</p>
         )}
       </div>
 
       {/* Priority / urgency badge */}
       {item.type === 'exam-prep' && item.daysLeft <= 3 && (
-        <span className="text-xs px-1.5 py-0.5 rounded border border-red-primary/30 text-red-primary shrink-0">
+        <span className="text-[11px] px-1.5 py-0.5 rounded border border-red-primary/30 text-red-primary shrink-0 font-body">
           紧急
         </span>
       )}
       {item.type === 'study' && item.priority === 'high' && (
-        <span className="text-xs px-1.5 py-0.5 rounded border border-accent-gold/30 text-accent-gold shrink-0">
+        <span className="text-[11px] px-1.5 py-0.5 rounded border border-accent-gold/30 text-accent-gold shrink-0 font-body">
           重点
         </span>
       )}
@@ -144,7 +144,7 @@ export default function AgendaItem({ item, index, onToggleComplete }: AgendaItem
       className="border-b border-border-warm last:border-b-0"
     >
       {link && !isCompleted ? (
-        <Link to={link} className="block no-underline hover:bg-bg-accent/50 transition-colors -mx-2 px-2 rounded">
+        <Link to={link} className="block no-underline hover:bg-bg-accent/40 transition-colors duration-150 -mx-2 px-2 rounded">
           {content}
         </Link>
       ) : (

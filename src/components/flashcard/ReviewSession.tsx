@@ -1,16 +1,17 @@
 /**
  * ReviewSession — core FSRS-driven review flow.
  * Shows cards one by one, collects ratings, tracks time, shows completion stats.
+ * Editorial academic design: journal-style progress, elegant rating controls.
  */
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { BookOpen, Sparkles, ArrowRight, CheckCircle2 } from 'lucide-react'
 import type { FlashcardCard as FCard, FlashcardDeck } from '@/lib/fsrs'
 import {
   getSchedulingChoices,
   formatInterval,
   reviewCard,
   ratingLabel,
-  ratingColor,
   Rating,
   saveDeck,
 } from '@/lib/fsrs'
@@ -64,6 +65,14 @@ const RATINGS: Array<1 | 2 | 3 | 4> = [
   Rating.Easy as 4,
 ]
 
+/** Map rating to editorial color tokens */
+const ratingStyle: Record<1 | 2 | 3 | 4, { color: string; label: string; hoverBg: string }> = {
+  1: { color: 'var(--color-red-primary)', label: '忘记', hoverBg: 'var(--color-red-primary)' },
+  2: { color: 'var(--color-accent-gold)', label: '困难', hoverBg: 'var(--color-accent-gold)' },
+  3: { color: 'var(--color-success)', label: '记得', hoverBg: 'var(--color-success)' },
+  4: { color: 'var(--color-info)', label: '简单', hoverBg: 'var(--color-info)' },
+}
+
 /* ------------------------------------------------------------------ */
 /*  Sub-components                                                     */
 /* ------------------------------------------------------------------ */
@@ -71,17 +80,21 @@ const RATINGS: Array<1 | 2 | 3 | 4> = [
 function ProgressBar({ current, total }: { current: number; total: number }) {
   const pct = total > 0 ? (current / total) * 100 : 0
   return (
-    <div className="w-full mb-6">
-      <div className="flex justify-between text-xs text-text-muted mb-1.5">
-        <span>{current} / {total}</span>
-        <span>{Math.round(pct)}%</span>
+    <div className="w-full mb-8">
+      {/* Reading-progress style: thin line at top */}
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-[11px] font-mono text-text-muted tracking-tight">
+          {current} of {total}
+        </span>
+        <span className="text-[11px] font-mono text-text-muted tracking-tight">
+          {Math.round(pct)}%
+        </span>
       </div>
-      <div className="h-1.5 bg-bg-main rounded-full overflow-hidden border border-border-warm">
+      <div className="h-[2px] bg-border-warm overflow-hidden">
         <motion.div
-          className="h-full rounded-full"
-          style={{ backgroundColor: 'var(--color-red-primary)' }}
+          className="h-full bg-red-primary"
           animate={{ width: `${pct}%` }}
-          transition={{ duration: 0.3 }}
+          transition={{ duration: 0.4, ease: 'easeOut' }}
         />
       </div>
     </div>
@@ -97,26 +110,27 @@ function RatingButton({
   interval: string
   onClick: () => void
 }) {
-  const color = ratingColor(rating)
+  const style = ratingStyle[rating]
   return (
     <button
       onClick={onClick}
-      className="flex-1 py-3 px-2 rounded border text-sm font-body transition-colors hover:text-white"
-      style={{
-        borderColor: `${color}60`,
-        color,
-      }}
+      className="group flex-1 py-3 px-2 border border-border-warm bg-bg-card text-center transition-all duration-200 hover:border-current"
+      style={{ color: style.color }}
       onMouseEnter={(e) => {
-        e.currentTarget.style.backgroundColor = color
-        e.currentTarget.style.color = '#fff'
+        const el = e.currentTarget
+        el.style.backgroundColor = style.hoverBg
+        el.style.color = '#FFFEFB'
+        el.style.borderColor = style.hoverBg
       }}
       onMouseLeave={(e) => {
-        e.currentTarget.style.backgroundColor = ''
-        e.currentTarget.style.color = color
+        const el = e.currentTarget
+        el.style.backgroundColor = ''
+        el.style.color = style.color
+        el.style.borderColor = ''
       }}
     >
-      <span className="block font-medium">{ratingLabel(rating)}</span>
-      <span className="block text-xs mt-0.5 opacity-80">{interval}</span>
+      <span className="block text-sm font-heading">{style.label}</span>
+      <span className="block text-[10px] mt-1 opacity-70 font-mono">{interval}</span>
     </button>
   )
 }
@@ -126,12 +140,10 @@ function CompletionScreen({ stats, deck, onClose }: { stats: SessionStats; deck:
 
   function handleApplyEvolution(suggestion: EvolutionSuggestion) {
     const updated = applyEvolution(deck, suggestion.action)
-    // Update deck in-place for persistence
     deck.notes = updated.notes
     deck.cards = updated.cards
     saveDeck(deck)
 
-    // Log evolution
     saveEvolutionLog(deck.courseId, {
       id: `evo-${Date.now()}`,
       trigger: suggestion.trigger,
@@ -141,63 +153,133 @@ function CompletionScreen({ stats, deck, onClose }: { stats: SessionStats; deck:
 
     setAppliedEvolutions((prev) => new Set([...prev, suggestion.trigger.cardId]))
   }
+
   const correctCount = stats.ratings[Rating.Good as 3] + stats.ratings[Rating.Easy as 4]
   const correctPct = stats.total > 0 ? Math.round((correctCount / stats.total) * 100) : 0
   const avgTimeS = stats.total > 0 ? (stats.totalTimeMs / stats.total / 1000).toFixed(1) : '0'
 
   return (
     <motion.div
-      className="text-center py-12 max-w-md mx-auto"
-      initial={{ opacity: 0, y: 20 }}
+      className="max-w-md mx-auto"
+      initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4 }}
     >
-      <h2 className="font-heading text-2xl text-text-main mb-2">复习完成</h2>
-      <p className="text-text-muted mb-8">本次共复习 {stats.total} 张卡片</p>
-
-      <div className="grid grid-cols-2 gap-4 mb-8">
-        <StatCard label="正确率" value={`${correctPct}%`} />
-        <StatCard label="平均用时" value={`${avgTimeS}s`} />
-        <StatCard
-          label="记得 / 简单"
-          value={`${correctCount}`}
-          valueColor="#4CAF50"
-        />
-        <StatCard
-          label="忘记 / 困难"
-          value={`${stats.ratings[Rating.Again as 1] + stats.ratings[Rating.Hard as 2]}`}
-          valueColor="#A5192E"
-        />
+      {/* Completion header — academic journal style */}
+      <div className="text-center pt-8 pb-6 border-b border-border-warm mb-8">
+        <div className="inline-flex items-center gap-2 mb-3">
+          <CheckCircle2 size={18} strokeWidth={1.5} className="text-success" />
+          <span className="text-xs font-mono uppercase tracking-widest text-text-muted">
+            Session Complete
+          </span>
+        </div>
+        <h2 className="font-heading text-2xl text-text-main">复习完成</h2>
+        <p className="text-sm text-text-muted mt-1">
+          本次共复习 {stats.total} 张卡片
+        </p>
       </div>
 
-      {/* Evolution suggestions */}
+      {/* Stats table — academic results style */}
+      <div className="border border-border-warm mb-8">
+        <div className="grid grid-cols-2">
+          <ResultCell label="正确率" value={`${correctPct}%`} />
+          <ResultCell label="平均用时" value={`${avgTimeS}s`} borderLeft />
+          <ResultCell
+            label="记得 / 简单"
+            value={`${correctCount}`}
+            valueColor="var(--color-success)"
+            borderTop
+          />
+          <ResultCell
+            label="忘记 / 困难"
+            value={`${stats.ratings[Rating.Again as 1] + stats.ratings[Rating.Hard as 2]}`}
+            valueColor="var(--color-red-primary)"
+            borderLeft
+            borderTop
+          />
+        </div>
+      </div>
+
+      {/* Rating breakdown — inline row */}
+      <div className="flex items-center justify-center gap-6 mb-8 text-xs text-text-muted">
+        {RATINGS.map((r) => (
+          <span key={r} className="flex items-center gap-1.5">
+            <span
+              className="inline-block w-2 h-2 rounded-full"
+              style={{ backgroundColor: ratingStyle[r].color }}
+            />
+            {ratingLabel(r)} {stats.ratings[r]}
+          </span>
+        ))}
+      </div>
+
+      {/* Mastery changes — editorial table */}
+      {stats.masteryChanges.length > 0 && (
+        <div className="mb-8">
+          <SectionHeading icon={<BookOpen size={14} strokeWidth={1.5} />} title="知识掌握度变化" />
+          <div className="border border-border-warm divide-y divide-border-warm">
+            {stats.masteryChanges.map((change) => {
+              const level = getMasteryLevel(change.after)
+              const color = getMasteryColor(level)
+              const diff = change.after - change.before
+              const sign = diff > 0 ? '+' : ''
+              return (
+                <div key={change.moduleId} className="flex items-center justify-between px-4 py-3 bg-bg-card">
+                  <span className="text-sm text-text-body">{change.moduleName}</span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs font-mono text-text-muted">
+                      {Math.round(change.before * 100)}%
+                    </span>
+                    <ArrowRight size={12} className="text-text-muted" />
+                    <span className="text-sm font-mono font-medium" style={{ color }}>
+                      {Math.round(change.after * 100)}%
+                    </span>
+                    <span
+                      className="text-[10px] font-mono px-1.5 py-0.5 border"
+                      style={{ borderColor: `${color}30`, color }}
+                    >
+                      {sign}{Math.round(diff * 100)}% {getMasteryLabel(level)}
+                    </span>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Evolution suggestions — Editor's Recommendations */}
       {stats.evolutionSuggestions.length > 0 && (
-        <div className="mb-8 text-left">
-          <h3 className="font-heading text-base text-text-main mb-3">
-            AI 闪卡优化建议
-          </h3>
-          <div className="space-y-2">
+        <div className="mb-8">
+          <SectionHeading icon={<Sparkles size={14} strokeWidth={1.5} />} title="编辑建议" subtitle="Editor's Recommendations" />
+          <div className="border border-border-warm divide-y divide-border-warm">
             {stats.evolutionSuggestions.map((suggestion) => {
               const isApplied = appliedEvolutions.has(suggestion.trigger.cardId)
+              const actionLabel =
+                suggestion.action.type === 'split' ? '拆分为子卡片' :
+                suggestion.action.type === 'retire' ? '退役此卡片' :
+                suggestion.action.type === 'rewrite' ? '改写问法' : '添加记忆提示'
+
               return (
                 <div
                   key={`${suggestion.trigger.cardId}-${suggestion.trigger.type}`}
-                  className={`flex items-center justify-between border rounded px-3 py-2 ${isApplied ? 'border-green-500/30 bg-green-50' : 'border-border-warm'}`}
+                  className={`flex items-center justify-between px-4 py-3 ${isApplied ? 'bg-bg-accent' : 'bg-bg-card'}`}
                 >
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-text-body">{suggestion.description}</p>
-                    <p className="text-xs text-text-muted mt-0.5">
-                      {suggestion.action.type === 'split' ? '拆分为子卡片' :
-                       suggestion.action.type === 'retire' ? '退役此卡片' :
-                       suggestion.action.type === 'rewrite' ? '改写问法' : '添加记忆提示'}
+                  <div className="flex-1 min-w-0 mr-4">
+                    <p className="text-sm text-text-body leading-snug">{suggestion.description}</p>
+                    <p className="text-[11px] text-text-muted mt-1 font-mono tracking-tight italic">
+                      {actionLabel}
                     </p>
                   </div>
                   {isApplied ? (
-                    <span className="text-xs text-green-600 shrink-0 ml-3">已应用</span>
+                    <span className="text-[11px] text-success font-mono shrink-0 flex items-center gap-1">
+                      <CheckCircle2 size={12} strokeWidth={1.5} />
+                      已应用
+                    </span>
                   ) : (
                     <button
                       onClick={() => handleApplyEvolution(suggestion)}
-                      className="text-xs px-2 py-1 rounded border border-red-primary/30 text-red-primary hover:bg-red-primary hover:text-white transition-colors shrink-0 ml-3"
+                      className="text-xs px-3 py-1.5 border border-red-primary/30 text-red-primary hover:bg-red-primary hover:text-white transition-colors shrink-0 font-body"
                     >
                       应用
                     </button>
@@ -209,65 +291,62 @@ function CompletionScreen({ stats, deck, onClose }: { stats: SessionStats; deck:
         </div>
       )}
 
-      {/* Mastery changes */}
-      {stats.masteryChanges.length > 0 && (
-        <div className="mb-8 text-left">
-          <h3 className="font-heading text-base text-text-main mb-3">知识掌握度变化</h3>
-          <div className="space-y-2">
-            {stats.masteryChanges.map((change) => {
-              const level = getMasteryLevel(change.after)
-              const color = getMasteryColor(level)
-              const diff = change.after - change.before
-              const arrow = diff > 0 ? '↑' : '↓'
-              return (
-                <div key={change.moduleId} className="flex items-center justify-between border border-border-warm rounded px-3 py-2">
-                  <span className="text-sm text-text-body">{change.moduleName}</span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-text-muted">
-                      {Math.round(change.before * 100)}%
-                    </span>
-                    <span style={{ color }} className="text-sm font-medium">
-                      {arrow} {Math.round(change.after * 100)}%
-                    </span>
-                    <span className="text-xs px-1.5 py-0.5 rounded border" style={{ borderColor: `${color}40`, color }}>
-                      {getMasteryLabel(level)}
-                    </span>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      )}
-
-      <button
-        onClick={onClose}
-        className="px-6 py-2.5 rounded border border-red-primary text-red-primary font-body hover:bg-red-primary hover:text-white transition-colors"
-      >
-        返回闪卡列表
-      </button>
+      {/* Return button */}
+      <div className="text-center pb-8">
+        <button
+          onClick={onClose}
+          className="px-8 py-2.5 border border-red-primary text-red-primary font-body text-sm hover:bg-red-primary hover:text-white transition-colors"
+        >
+          返回闪卡列表
+        </button>
+      </div>
     </motion.div>
   )
 }
 
-function StatCard({
+/** Academic results cell for the 2x2 stats grid */
+function ResultCell({
   label,
   value,
   valueColor,
+  borderLeft,
+  borderTop,
 }: {
   label: string
   value: string
   valueColor?: string
+  borderLeft?: boolean
+  borderTop?: boolean
 }) {
+  const borderClasses = [
+    borderLeft ? 'border-l border-l-border-warm' : '',
+    borderTop ? 'border-t border-t-border-warm' : '',
+  ].join(' ')
+
   return (
-    <div className="border border-border-warm bg-bg-card rounded-lg p-4">
-      <p className="text-xs text-text-muted mb-1">{label}</p>
+    <div className={`bg-bg-card px-4 py-4 ${borderClasses}`}>
+      <p className="text-[11px] font-mono uppercase tracking-wider text-text-muted mb-1">{label}</p>
       <p
         className="font-heading text-2xl"
         style={{ color: valueColor ?? 'var(--color-text-main)' }}
       >
         {value}
       </p>
+    </div>
+  )
+}
+
+/** Section heading with icon — editorial journal style */
+function SectionHeading({ icon, title, subtitle }: { icon: React.ReactNode; title: string; subtitle?: string }) {
+  return (
+    <div className="flex items-center gap-2 mb-3">
+      <span className="text-red-primary">{icon}</span>
+      <h3 className="font-heading text-base text-text-main">{title}</h3>
+      {subtitle && (
+        <span className="text-[10px] font-mono uppercase tracking-widest text-text-muted ml-1">
+          {subtitle}
+        </span>
+      )}
     </div>
   )
 }
@@ -448,9 +527,9 @@ export default function ReviewSession({ deck, dueCards, onComplete }: ReviewSess
       <AnimatePresence mode="wait">
         <motion.div
           key={currentCard?.id}
-          initial={{ opacity: 0, x: 40 }}
+          initial={{ opacity: 0, x: 30 }}
           animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: -40 }}
+          exit={{ opacity: 0, x: -30 }}
           transition={{ duration: 0.25 }}
         >
           <FlashcardCard
@@ -465,10 +544,10 @@ export default function ReviewSession({ deck, dueCards, onComplete }: ReviewSess
       <AnimatePresence>
         {isFlipped && (
           <motion.div
-            className="flex gap-3 mt-8"
-            initial={{ opacity: 0, y: 12 }}
+            className="flex gap-[1px] mt-8 border border-border-warm overflow-hidden"
+            initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 12 }}
+            exit={{ opacity: 0, y: 10 }}
             transition={{ duration: 0.2 }}
           >
             {RATINGS.map((r) => (
@@ -484,7 +563,7 @@ export default function ReviewSession({ deck, dueCards, onComplete }: ReviewSess
       </AnimatePresence>
 
       {!isFlipped && (
-        <p className="text-center text-text-muted text-sm mt-8">
+        <p className="text-center text-text-muted text-xs mt-8 tracking-wide">
           点击卡片查看答案，然后选择掌握程度
         </p>
       )}

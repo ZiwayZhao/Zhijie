@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
+import { Upload } from 'lucide-react'
 import DropZone from '@/components/upload/DropZone'
 import FileList from '@/components/upload/FileList'
 import type { UploadFile } from '@/components/upload/FileList'
@@ -105,18 +106,25 @@ export default function UploadPage() {
   }
 
   return (
-    <div className="max-w-[720px] mx-auto px-6 py-8">
-      <motion.div
+    <div className="max-w-[720px] mx-auto px-6 py-8 lg:py-10">
+      {/* Editorial page header */}
+      <motion.header
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.35 }}
-        className="mb-8"
+        className="mb-8 border-b border-border-warm pb-6"
       >
+        <div className="flex items-center gap-2 mb-2">
+          <Upload size={16} strokeWidth={1.5} className="text-red-primary" />
+          <span className="text-[10px] tracking-widest uppercase text-text-muted font-body">
+            Upload
+          </span>
+        </div>
         <h1 className="font-heading text-3xl text-text-main">上传学习材料</h1>
-        <p className="text-sm text-text-muted mt-2">
+        <p className="text-sm text-text-muted mt-2 leading-relaxed">
           上传课件、习题、笔记或考题，AI 将自动为你归类
         </p>
-      </motion.div>
+      </motion.header>
 
       <div className="space-y-6">
         {/* Drop zone */}
@@ -144,11 +152,11 @@ export default function UploadPage() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.3 }}
-            className="flex items-center justify-center gap-4"
+            className="flex items-center justify-center gap-4 pt-2"
           >
             <button
               onClick={handleGoToCourse}
-              className="px-5 py-2.5 rounded-md bg-red-primary text-white text-sm font-medium hover:bg-red-dark transition-colors"
+              className="px-5 py-2.5 rounded-sm bg-red-primary text-white text-sm font-medium hover:bg-red-dark transition-colors"
             >
               查看课程材料
             </button>

@@ -54,13 +54,20 @@ export default function ClassifyForm({ fileCount, onSubmit }: ClassifyFormProps)
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: 0.15, duration: 0.35 }}
-      className="space-y-5 border border-border-warm rounded-md bg-bg-card p-6"
+      className="space-y-6 border border-border-warm rounded-sm bg-bg-card p-6"
     >
-      <div className="flex items-center gap-2">
-        <h3 className="font-heading text-lg text-text-main">
-          材料归类
-        </h3>
-        <span className="text-xs text-text-muted">({fileCount} 个文件)</span>
+      {/* Header */}
+      <div>
+        <span className="text-[10px] tracking-widest uppercase text-text-muted font-body">
+          Classification
+        </span>
+        <div className="flex items-center gap-2 mt-0.5">
+          <h3 className="font-heading text-xl text-text-main">
+            材料归类
+          </h3>
+          <span className="text-xs text-text-muted italic">({fileCount} 个文件)</span>
+        </div>
+        <div className="w-8 h-px bg-red-primary mt-2" />
       </div>
 
       {/* Course select */}
@@ -91,7 +98,7 @@ export default function ClassifyForm({ fileCount, onSubmit }: ClassifyFormProps)
           {tags.map((tag) => (
             <span
               key={tag}
-              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-sm border border-accent-gold/40 bg-accent-gold/10 text-accent-gold"
+              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs border border-accent-gold/40 bg-accent-gold/10 text-accent-gold"
             >
               <Sparkles size={10} strokeWidth={1.5} />
               {tag}
@@ -114,7 +121,7 @@ export default function ClassifyForm({ fileCount, onSubmit }: ClassifyFormProps)
         />
       </Field>
 
-      {/* Material type */}
+      {/* Material type — editorial tab-like selection */}
       <Field label="材料类型">
         <div className="flex flex-wrap gap-2">
           {materialTypes.map((t) => (
@@ -122,10 +129,10 @@ export default function ClassifyForm({ fileCount, onSubmit }: ClassifyFormProps)
               key={t}
               onClick={() => setMaterialType(t)}
               className={[
-                'px-3 py-1.5 text-sm rounded-sm border transition-colors',
+                'px-4 py-1.5 text-sm rounded-sm border transition-colors',
                 materialType === t
                   ? 'border-red-primary bg-red-primary text-white'
-                  : 'border-border-warm text-text-body hover:border-red-primary',
+                  : 'border-border-warm text-text-body hover:border-red-primary hover:text-red-primary',
               ].join(' ')}
             >
               {t}
@@ -164,11 +171,11 @@ export default function ClassifyForm({ fileCount, onSubmit }: ClassifyFormProps)
         />
       </Field>
 
-      {/* Submit */}
+      {/* Submit — editorial red button */}
       <button
         onClick={() => onSubmit({ courseId, materialType, semester, tags, description })}
         disabled={!courseId || !materialType}
-        className="w-full py-3 rounded-md bg-red-primary text-white text-sm font-medium
+        className="w-full py-3 rounded-sm bg-red-primary text-white text-sm font-medium
                    hover:bg-red-dark transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
       >
         上传并发布
@@ -179,7 +186,7 @@ export default function ClassifyForm({ fileCount, onSubmit }: ClassifyFormProps)
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-2">
       <label className="text-sm font-medium text-text-main">{label}</label>
       {children}
     </div>

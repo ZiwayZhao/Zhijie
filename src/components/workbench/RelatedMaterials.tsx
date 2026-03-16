@@ -1,6 +1,6 @@
 import { motion } from 'framer-motion'
 import { Link } from 'react-router-dom'
-import { FileText } from 'lucide-react'
+import { FileText, ChevronRight } from 'lucide-react'
 import type { Material } from '@/mocks/materials'
 
 interface RelatedMaterialsProps {
@@ -23,36 +23,53 @@ export default function RelatedMaterials({
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ delay: 0.3, duration: 0.4 }}
-      className="border-t border-border-warm pt-6 mt-8"
+      className="border-t border-border-warm pt-8 mt-10"
     >
-      <h3 className="font-heading text-lg text-text-main mb-4">
-        相关材料
-      </h3>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      {/* Academic "Related Readings" header */}
+      <div className="mb-5">
+        <span className="text-[10px] tracking-widest uppercase text-text-muted font-body">
+          Related Readings
+        </span>
+        <h3 className="font-heading text-xl text-text-main mt-0.5">
+          相关材料
+        </h3>
+        <div className="w-8 h-px bg-red-primary mt-2" />
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {related.map((m, i) => (
           <motion.div
             key={m.id}
-            initial={{ opacity: 0, y: 8 }}
+            initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.4 + i * 0.08 }}
+            transition={{ delay: 0.4 + i * 0.08, duration: 0.35 }}
           >
             <Link
               to={`/course/${courseId}/material/${m.id}`}
-              className="flex items-start gap-3 p-3 border border-border-warm rounded-md bg-bg-card hover:border-red-primary transition-colors no-underline"
+              className="group flex items-start gap-3 p-4 border border-border-warm rounded-sm
+                         bg-bg-card hover:border-red-primary transition-colors no-underline"
             >
-              <FileText
-                size={16}
-                strokeWidth={1.5}
-                className="text-text-muted mt-0.5 shrink-0"
-              />
-              <div className="min-w-0">
-                <p className="text-sm text-text-main font-medium truncate">
+              <div className="w-8 h-8 shrink-0 flex items-center justify-center border border-border-warm
+                              group-hover:border-red-primary transition-colors">
+                <FileText
+                  size={14}
+                  strokeWidth={1.5}
+                  className="text-text-muted group-hover:text-red-primary transition-colors"
+                />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm text-text-main font-medium truncate group-hover:text-red-primary transition-colors">
                   {m.name}
                 </p>
-                <p className="text-xs text-text-muted mt-0.5">
-                  {m.type} · {m.uploader}
+                <p className="text-xs text-text-muted mt-1 italic">
+                  {m.type} · {m.uploader} · {m.uploadTime}
                 </p>
               </div>
+              <ChevronRight
+                size={14}
+                strokeWidth={1.5}
+                className="text-border-warm group-hover:text-red-primary transition-colors shrink-0 mt-0.5"
+              />
             </Link>
           </motion.div>
         ))}

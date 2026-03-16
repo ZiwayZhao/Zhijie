@@ -32,11 +32,14 @@ export default function FileList({ files, onRemove }: FileListProps) {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ delay: 0.1 }}
-      className="space-y-2"
+      className="space-y-3"
     >
-      <h3 className="font-heading text-base text-text-main">
-        已选择文件 ({files.length})
-      </h3>
+      <div className="flex items-center gap-2">
+        <span className="text-[10px] tracking-widest uppercase text-text-muted font-body">
+          Selected Files
+        </span>
+        <span className="text-xs text-text-muted">({files.length})</span>
+      </div>
       <AnimatePresence>
         {files.map((f, i) => {
           const Icon = getFileIcon(f.file.name)
@@ -47,19 +50,22 @@ export default function FileList({ files, onRemove }: FileListProps) {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: 8 }}
               transition={{ delay: i * 0.05 }}
-              className="flex items-center gap-3 p-3 border border-border-warm rounded-md bg-bg-card"
+              className="flex items-center gap-3 p-3.5 border border-border-warm rounded-sm bg-bg-card
+                         hover:border-red-primary/30 transition-colors"
             >
-              <Icon size={18} strokeWidth={1.5} className="text-text-muted shrink-0" />
+              <div className="w-8 h-8 flex items-center justify-center border border-border-warm shrink-0">
+                <Icon size={15} strokeWidth={1.5} className="text-text-muted" />
+              </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm text-text-main truncate">{f.file.name}</p>
-                <p className="text-xs text-text-muted">{formatSize(f.file.size)}</p>
+                <p className="text-xs text-text-muted italic mt-0.5">{formatSize(f.file.size)}</p>
               </div>
               <button
                 onClick={() => onRemove(f.id)}
-                className="p-1 rounded hover:bg-bg-accent transition-colors"
+                className="p-1.5 rounded-sm hover:bg-bg-accent transition-colors"
                 aria-label="删除文件"
               >
-                <X size={14} strokeWidth={1.5} className="text-text-muted" />
+                <X size={13} strokeWidth={1.5} className="text-text-muted hover:text-red-primary transition-colors" />
               </button>
             </motion.div>
           )

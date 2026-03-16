@@ -1,11 +1,11 @@
 /**
- * SocraticChat — mock Socratic dialogue engine.
- * Uses structured questions instead of direct answers.
+ * SocraticChat — Socratic dialogue engine styled as a philosophy text.
+ * AI messages as journal quotes (border-l-3), user messages on warm accent.
  * Scaffold level driven by mastery (ZPD).
  */
 import { useState, useRef, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { MessageCircle, Send, Lightbulb, Eye } from 'lucide-react'
+import { Send, Lightbulb, Eye, X } from 'lucide-react'
 import { getScaffoldLevel } from '@/lib/student-model'
 import type { ScaffoldLevel } from '@/lib/student-model'
 
@@ -30,6 +30,16 @@ interface ChatMessage {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Scaffold metadata                                                  */
+/* ------------------------------------------------------------------ */
+
+const scaffoldMeta: Record<ScaffoldLevel, { label: string; sublabel: string; intensity: string }> = {
+  full: { label: '引导模式', sublabel: 'Guided', intensity: 'high' },
+  moderate: { label: '讨论模式', sublabel: 'Dialogue', intensity: 'mid' },
+  minimal: { label: '挑战模式', sublabel: 'Challenge', intensity: 'low' },
+}
+
+/* ------------------------------------------------------------------ */
 /*  Mock response engine                                               */
 /* ------------------------------------------------------------------ */
 
@@ -41,7 +51,6 @@ function generateSocraticResponse(
   const id = `msg-${Date.now()}`
 
   if (scaffold === 'full') {
-    // High scaffold: step-by-step guidance
     return {
       id,
       role: 'assistant',
@@ -52,7 +61,6 @@ function generateSocraticResponse(
   }
 
   if (scaffold === 'moderate') {
-    // Medium scaffold: balanced hints and questions
     const questions = [
       `关于"${userMessage.slice(0, 20)}"，你能想到哪些相关的概念？它们之间有什么联系？`,
       `你已经有不错的基础了。想想看，这个问题的关键在于什么？为什么它在${moduleName}中很重要？`,
@@ -66,7 +74,6 @@ function generateSocraticResponse(
     }
   }
 
-  // Minimal scaffold: mostly questions
   const challenges = [
     `很好，你对这个已经相当熟悉了。那么，你能解释为什么${moduleName}中采用这种方法而不是其他方案吗？`,
     `你能举一个反例来测试你的理解吗？或者说，在什么边界条件下这个结论不再成立？`,
@@ -85,11 +92,7 @@ function generateSocraticResponse(
 
 export default function SocraticChat({ moduleName, mastery, onClose }: SocraticChatProps) {
   const scaffold = getScaffoldLevel(mastery)
-  const scaffoldLabels: Record<ScaffoldLevel, string> = {
-    full: '引导模式',
-    moderate: '讨论模式',
-    minimal: '挑战模式',
-  }
+  const meta = scaffoldMeta[scaffold]
 
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
@@ -118,7 +121,6 @@ export default function SocraticChat({ moduleName, mastery, onClose }: SocraticC
     setMessages((prev) => [...prev, userMsg])
     setInput('')
 
-    // Simulate async response
     setTimeout(() => {
       const response = generateSocraticResponse(text, moduleName, scaffold)
       setMessages((prev) => [...prev, response])
@@ -139,92 +141,139 @@ export default function SocraticChat({ moduleName, mastery, onClose }: SocraticC
   }
 
   return (
-    <div className="flex flex-col h-full border border-border-warm rounded-lg bg-bg-card">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border-warm">
-        <div className="flex items-center gap-2">
-          <MessageCircle size={16} strokeWidth={1.5} className="text-red-primary" />
-          <span className="font-heading text-sm text-text-main">苏格拉底对话</span>
-          <span className="text-xs px-1.5 py-0.5 rounded border border-border-warm text-text-muted">
-            {scaffoldLabels[scaffold]}
+    <div className="flex flex-col h-full border border-border-warm bg-bg-card">
+      {/* Header — editorial strip */}
+      <div className="px-5 py-3 border-b border-border-warm">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <span className="font-heading text-sm text-text-main">
+              苏格拉底对话
+            </span>
+            <span className="text-[10px] font-mono uppercase tracking-widest text-text-muted">
+              {meta.sublabel}
+            </span>
+          </div>
+          <button
+            onClick={onClose}
+            className="w-6 h-6 flex items-center justify-center text-text-muted hover:text-red-primary transition-colors"
+          >
+            <X size={14} strokeWidth={1.5} />
+          </button>
+        </div>
+        {/* Scaffold level indicator — subtle bar */}
+        <div className="flex items-center gap-2 mt-2">
+          <span className="text-[10px] text-text-muted">{meta.label}</span>
+          <div className="flex gap-0.5">
+            {(['high', 'mid', 'low'] as const).map((level) => (
+              <div
+                key={level}
+                className="h-[3px] w-5 transition-colors"
+                style={{
+                  backgroundColor:
+                    (meta.intensity === 'high') ||
+                    (meta.intensity === 'mid' && level !== 'low') ||
+                    (meta.intensity === 'low' && level === 'low')
+                      ? 'var(--color-red-primary)'
+                      : 'var(--color-border-warm)',
+                  opacity:
+                    (meta.intensity === 'high') ||
+                    (meta.intensity === 'mid' && level !== 'low') ||
+                    (meta.intensity === 'low' && level === 'low')
+                      ? 1 : 0.5,
+                }}
+              />
+            ))}
+          </div>
+          <span className="text-[10px] text-text-muted font-mono">
+            mastery {Math.round(mastery * 100)}%
           </span>
         </div>
-        <button
-          onClick={onClose}
-          className="text-xs text-text-muted hover:text-red-primary transition-colors"
-        >
-          关闭
-        </button>
       </div>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-[200px] max-h-[400px]">
+      {/* Messages — philosophy text feel */}
+      <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5 min-h-[200px] max-h-[400px]">
         {messages.map((msg, i) => (
           <motion.div
             key={msg.id}
-            initial={{ opacity: 0, y: 8 }}
+            initial={{ opacity: 0, y: 6 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: i === messages.length - 1 ? 0.1 : 0, duration: 0.25 }}
-            className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
           >
-            <div
-              className={`max-w-[85%] rounded-lg px-4 py-3 text-sm leading-relaxed ${
-                msg.role === 'user'
-                  ? 'bg-bg-accent text-text-body'
-                  : 'border-l-3 border-l-red-primary bg-bg-card border border-border-warm text-text-body'
-              }`}
-            >
-              <p className="whitespace-pre-wrap">{msg.content}</p>
+            {msg.role === 'assistant' ? (
+              /* AI message — journal blockquote style */
+              <div className="border-l-3 border-l-red-primary pl-4 py-1">
+                <p className="text-sm text-text-body leading-relaxed whitespace-pre-wrap">
+                  {msg.content}
+                </p>
 
-              {/* Hint */}
-              {msg.hint && !msg.revealed && (
-                <button
-                  onClick={() => handleReveal(msg.id)}
-                  className="flex items-center gap-1 mt-3 text-xs text-accent-gold hover:text-red-primary transition-colors"
-                >
-                  <Lightbulb size={12} strokeWidth={1.5} />
-                  显示提示
-                </button>
-              )}
-              {msg.hint && msg.revealed && (
-                <div className="mt-3 text-xs text-accent-gold border-t border-border-warm pt-2">
-                  {msg.hint}
+                {/* Hint reveal — elegant expandable */}
+                {msg.hint && !msg.revealed && (
+                  <button
+                    onClick={() => handleReveal(msg.id)}
+                    className="inline-flex items-center gap-1.5 mt-3 text-[11px] text-accent-gold hover:text-red-primary transition-colors"
+                  >
+                    <Lightbulb size={11} strokeWidth={1.5} />
+                    <span className="italic">显示提示</span>
+                  </button>
+                )}
+                {msg.hint && msg.revealed && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    transition={{ duration: 0.25 }}
+                    className="mt-3 pt-2 border-t border-border-warm"
+                  >
+                    <p className="text-[11px] text-accent-gold leading-relaxed italic">
+                      {msg.hint}
+                    </p>
+                  </motion.div>
+                )}
+
+                {/* Generic reveal */}
+                {msg.hasReveal && !msg.hint && !msg.revealed && (
+                  <button
+                    onClick={() => handleReveal(msg.id)}
+                    className="inline-flex items-center gap-1.5 mt-3 text-[11px] text-text-muted hover:text-red-primary transition-colors"
+                  >
+                    <Eye size={11} strokeWidth={1.5} />
+                    <span className="italic">查看参考答案</span>
+                  </button>
+                )}
+              </div>
+            ) : (
+              /* User message — right-aligned, warm accent */
+              <div className="flex justify-end">
+                <div className="max-w-[80%] bg-bg-accent border border-border-warm px-4 py-3">
+                  <p className="text-sm text-text-body leading-relaxed whitespace-pre-wrap">
+                    {msg.content}
+                  </p>
                 </div>
-              )}
-
-              {/* Reveal answer */}
-              {msg.hasReveal && !msg.hint && !msg.revealed && (
-                <button
-                  onClick={() => handleReveal(msg.id)}
-                  className="flex items-center gap-1 mt-3 text-xs text-text-muted hover:text-red-primary transition-colors"
-                >
-                  <Eye size={12} strokeWidth={1.5} />
-                  查看参考答案
-                </button>
-              )}
-            </div>
+              </div>
+            )}
           </motion.div>
         ))}
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input */}
-      <div className="flex items-center gap-2 p-3 border-t border-border-warm">
-        <input
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="输入你的问题或想法..."
-          className="flex-1 text-sm bg-transparent border-none outline-none text-text-body placeholder:text-text-muted/60"
-        />
-        <button
-          onClick={handleSend}
-          disabled={!input.trim()}
-          className="w-8 h-8 rounded flex items-center justify-center text-text-muted hover:text-red-primary hover:bg-bg-accent transition-colors disabled:opacity-30"
-        >
-          <Send size={16} strokeWidth={1.5} />
-        </button>
+      {/* Input area — warm academic feel */}
+      <div className="border-t border-border-warm px-4 py-3 bg-bg-main/50">
+        <div className="flex items-center gap-3">
+          <input
+            type="text"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="输入你的问题或想法..."
+            className="flex-1 text-sm bg-transparent border-none outline-none text-text-body placeholder:text-text-muted/50 font-body"
+          />
+          <button
+            onClick={handleSend}
+            disabled={!input.trim()}
+            className="w-8 h-8 flex items-center justify-center border border-border-warm text-text-muted hover:text-red-primary hover:border-red-primary transition-colors disabled:opacity-25 disabled:hover:text-text-muted disabled:hover:border-border-warm"
+          >
+            <Send size={14} strokeWidth={1.5} />
+          </button>
+        </div>
       </div>
     </div>
   )

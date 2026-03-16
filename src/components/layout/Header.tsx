@@ -18,19 +18,25 @@ export default function Header() {
   const title = pageTitles[location.pathname] ?? '智阶'
 
   return (
-    <header className="flex items-center justify-between px-8 py-4 border-b border-border-warm bg-bg-card">
-      <h2 className="font-heading text-xl text-text-main m-0">{title}</h2>
+    <header className="flex items-center justify-between px-10 py-4 border-b border-border-warm bg-bg-card">
+      {/* Page title — serif with decorative accent */}
+      <div className="flex items-center gap-3">
+        <div className="w-5 h-[2px] bg-red-primary rounded-full" />
+        <h2 className="font-heading text-xl text-text-main m-0 tracking-tight">{title}</h2>
+      </div>
 
       <div className="flex items-center gap-4">
-        {/* Search */}
-        <div className="flex items-center gap-2 px-3 py-2 border border-border-warm rounded-md bg-bg-main text-text-muted text-sm">
-          <Search size={16} strokeWidth={1.5} />
-          <span>搜索...</span>
+        {/* Search — warm editorial styling */}
+        <div className="flex items-center gap-2 px-3.5 py-2 border border-border-warm rounded-md bg-bg-main text-text-muted text-sm
+                        hover:border-red-primary/40 transition-colors duration-200 cursor-pointer">
+          <Search size={15} strokeWidth={1.5} />
+          <span className="font-body text-xs tracking-wide">搜索...</span>
         </div>
 
         {/* User avatar placeholder */}
-        <div className="w-8 h-8 rounded-full border border-border-warm bg-bg-accent flex items-center justify-center">
-          <User size={16} strokeWidth={1.5} className="text-text-muted" />
+        <div className="w-8 h-8 rounded-full border border-border-warm bg-bg-accent flex items-center justify-center
+                        hover:border-red-primary/40 transition-colors duration-200">
+          <User size={15} strokeWidth={1.5} className="text-text-muted" />
         </div>
       </div>
     </header>

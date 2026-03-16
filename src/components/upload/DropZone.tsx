@@ -50,10 +50,10 @@ export default function DropZone({ onFiles }: DropZoneProps) {
       onDrop={handleDrop}
       onClick={() => inputRef.current?.click()}
       className={[
-        'relative cursor-pointer rounded-md border-2 border-dashed p-12 text-center transition-all',
+        'relative cursor-pointer rounded-sm border-2 border-dashed py-16 px-12 text-center transition-all',
         isDragging
           ? 'border-red-primary bg-bg-accent'
-          : 'border-border-warm bg-bg-card hover:border-red-primary/50',
+          : 'border-border-warm bg-bg-card hover:border-red-primary/40 hover:bg-bg-accent/50',
       ].join(' ')}
     >
       <input
@@ -65,20 +65,30 @@ export default function DropZone({ onFiles }: DropZoneProps) {
         className="hidden"
       />
 
-      <div className="flex flex-col items-center gap-3">
+      <div className="flex flex-col items-center gap-4">
         {isDragging ? (
-          <FileUp size={40} strokeWidth={1} className="text-red-primary" />
+          <div className="w-14 h-14 flex items-center justify-center border-2 border-red-primary rounded-sm">
+            <FileUp size={28} strokeWidth={1} className="text-red-primary" />
+          </div>
         ) : (
-          <Upload size={40} strokeWidth={1} className="text-text-muted" />
+          <div className="w-14 h-14 flex items-center justify-center border border-border-warm rounded-sm">
+            <Upload size={28} strokeWidth={1} className="text-text-muted" />
+          </div>
         )}
         <div>
           <p className="text-sm font-medium text-text-main">
             {isDragging ? '松开以上传文件' : '拖拽文件到此处，或点击选择'}
           </p>
-          <p className="text-xs text-text-muted mt-1.5">
+          <p className="text-xs text-text-muted mt-2 leading-relaxed">
             支持 PDF、DOCX、PPT、图片等格式
           </p>
         </div>
+        {!isDragging && (
+          <span className="inline-block mt-1 px-4 py-1.5 text-xs border border-red-primary text-red-primary
+                           rounded-sm hover:bg-red-primary hover:text-white transition-colors">
+            选择文件
+          </span>
+        )}
       </div>
     </motion.div>
   )

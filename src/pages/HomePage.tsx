@@ -76,7 +76,7 @@ export default function HomePage() {
   })
 
   return (
-    <div className="p-8 max-w-6xl space-y-8">
+    <div className="px-10 py-8 max-w-6xl space-y-10">
       <WelcomeSection />
 
       {/* Exam countdowns (if any within 7 days) */}
@@ -86,7 +86,7 @@ export default function HomePage() {
           animate="visible"
           variants={fadeUp}
           custom={2}
-          className="flex gap-4 overflow-x-auto"
+          className="flex gap-5 overflow-x-auto"
         >
           {upcomingExams.map((config) => (
             <ExamCountdown key={config.courseId} examConfig={config} />
@@ -101,8 +101,8 @@ export default function HomePage() {
         onAddTodo={handleAddTodo}
       />
 
-      {/* Recent courses + Activity timeline */}
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-8">
+      {/* Recent courses + Activity timeline — 70:30 editorial ratio */}
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-10">
         <RecentCoursesSection />
         <ActivityTimeline />
       </div>
@@ -120,22 +120,28 @@ function WelcomeSection() {
 
   return (
     <motion.div initial="hidden" animate="visible" variants={fadeUp} custom={0}>
-      <h1 className="font-heading text-3xl text-text-main mb-1">{greeting}，同学</h1>
-      <div className="flex items-center gap-6 text-sm text-text-muted mt-2">
+      {/* Decorative red rule — editorial accent */}
+      <div className="w-12 h-[3px] bg-red-primary mb-4 rounded-full" />
+      <h1 className="font-heading text-3xl text-text-main tracking-tight mb-2">{greeting}，同学</h1>
+      {/* Stats as figure-caption row */}
+      <div className="flex items-center gap-5 text-xs text-text-muted mt-3 font-body tracking-wide uppercase">
         <span className="flex items-center gap-1.5">
-          <Clock size={14} strokeWidth={1.5} className="text-red-primary" />
+          <Clock size={13} strokeWidth={1.5} className="text-red-primary" />
           今日 {studyStats.todayMinutes} 分钟
         </span>
+        <span className="w-px h-3 bg-border-warm" />
         <span className="flex items-center gap-1.5">
-          <Flame size={14} strokeWidth={1.5} className="text-accent-gold" />
+          <Flame size={13} strokeWidth={1.5} className="text-accent-gold" />
           连续 {studyStats.streak} 天
         </span>
+        <span className="w-px h-3 bg-border-warm" />
         <span className="flex items-center gap-1.5">
-          <FileCheck size={14} strokeWidth={1.5} className="text-text-muted" />
+          <FileCheck size={13} strokeWidth={1.5} className="text-text-muted" />
           {studyStats.completedMaterials} 份材料
         </span>
+        <span className="w-px h-3 bg-border-warm" />
         <span className="flex items-center gap-1.5">
-          <BookOpen size={14} strokeWidth={1.5} className="text-text-muted" />
+          <BookOpen size={13} strokeWidth={1.5} className="text-text-muted" />
           本周 {Math.round(studyStats.weekMinutes / 60)} 小时
         </span>
       </div>
@@ -146,24 +152,29 @@ function WelcomeSection() {
 function RecentCoursesSection() {
   return (
     <motion.section initial="hidden" animate="visible" variants={fadeUp} custom={4}>
-      <h2 className="font-heading text-xl text-text-main mb-4">最近学习</h2>
-      <div className="flex gap-4 overflow-x-auto pb-2">
+      <div className="flex items-center gap-3 mb-5">
+        <div className="w-8 h-[2px] bg-red-primary rounded-full" />
+        <h2 className="font-heading text-xl text-text-main">最近学习</h2>
+      </div>
+      <div className="flex gap-5 overflow-x-auto pb-2">
         {recentCourses.map((c, i) => (
           <motion.div key={c.id} variants={fadeUp} custom={i + 5} className="shrink-0">
             <Link
               to={`/course/${c.id}`}
-              className="block w-52 border border-border-warm rounded-md bg-bg-card p-4
-                         hover:border-red-primary transition-colors no-underline"
+              className="group block w-56 border border-border-warm rounded-md bg-bg-card p-5
+                         hover:border-red-primary/60 transition-all duration-200 no-underline"
             >
-              <h3 className="font-heading text-base text-text-main mb-1">{c.name}</h3>
-              <p className="text-xs text-text-muted mb-3">{c.school}</p>
-              <div className="w-full h-1.5 rounded-full bg-bg-accent overflow-hidden">
+              <h3 className="font-heading text-base text-text-main mb-1 group-hover:text-red-primary transition-colors duration-200">
+                {c.name}
+              </h3>
+              <p className="text-xs text-text-muted mb-4 font-body">{c.school}</p>
+              <div className="w-full h-1 rounded-full bg-bg-accent overflow-hidden">
                 <div
                   className="h-full rounded-full bg-red-primary transition-all"
                   style={{ width: `${c.progress}%` }}
                 />
               </div>
-              <div className="flex justify-between mt-2 text-xs text-text-muted">
+              <div className="flex justify-between mt-2.5 text-xs text-text-muted font-body">
                 <span>进度 {c.progress}%</span>
                 <span>{c.lastVisit}</span>
               </div>
@@ -185,31 +196,33 @@ const activityIcons: Record<Activity['type'], typeof Upload> = {
 function ActivityTimeline() {
   return (
     <motion.section initial="hidden" animate="visible" variants={fadeUp} custom={6}>
-      <h2 className="font-heading text-xl text-text-main mb-4">学习动态</h2>
-      <div className="border border-border-warm rounded-md bg-bg-card p-5">
-        <div className="space-y-0">
-          {activities.map((a, i) => {
-            const Icon = activityIcons[a.type]
-            return (
-              <motion.div
-                key={a.id}
-                variants={fadeUp}
-                custom={i + 7}
-                className="flex gap-3 py-3 border-b border-border-warm last:border-b-0"
-              >
-                <div className="w-7 h-7 shrink-0 rounded-full bg-bg-accent flex items-center justify-center mt-0.5">
-                  <Icon size={14} className="text-red-primary" strokeWidth={1.5} />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-sm text-text-body leading-snug">{a.message}</p>
-                  <p className="text-xs text-text-muted mt-1">
-                    {a.courseName} · {a.time}
-                  </p>
-                </div>
-              </motion.div>
-            )
-          })}
-        </div>
+      <div className="flex items-center gap-3 mb-5">
+        <div className="w-8 h-[2px] bg-border-warm rounded-full" />
+        <h2 className="font-heading text-lg text-text-main">学习动态</h2>
+      </div>
+      {/* Margin-note style: left border, no card wrapper */}
+      <div className="border-l-2 border-border-warm pl-5 space-y-0">
+        {activities.map((a, i) => {
+          const Icon = activityIcons[a.type]
+          return (
+            <motion.div
+              key={a.id}
+              variants={fadeUp}
+              custom={i + 7}
+              className="flex gap-3 py-3 border-b border-border-warm/60 last:border-b-0"
+            >
+              <div className="w-6 h-6 shrink-0 rounded-full bg-bg-accent flex items-center justify-center mt-0.5">
+                <Icon size={12} className="text-red-primary" strokeWidth={1.5} />
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm text-text-body leading-snug">{a.message}</p>
+                <p className="text-[11px] text-text-muted mt-1 font-body">
+                  {a.courseName} · {a.time}
+                </p>
+              </div>
+            </motion.div>
+          )
+        })}
       </div>
     </motion.section>
   )
