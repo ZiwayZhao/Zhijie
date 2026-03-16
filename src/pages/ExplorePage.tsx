@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { motion, type Variants } from 'framer-motion'
 import { Search, TrendingUp, Library, Star, Globe, ExternalLink } from 'lucide-react'
@@ -37,26 +37,30 @@ export default function ExplorePage() {
       .catch((e) => console.error('Failed to load categories:', e))
   }, [])
 
-  // Fetch courses when filters change
-  const loadCourses = useCallback(async () => {
+  // Fetch courses when filters change (with abort on cleanup)
+  useEffect(() => {
+    let cancelled = false
     setLoading(true)
-    try {
-      const result = await fetchCourses({
-        page,
-        pageSize,
-        category: activeCategory || undefined,
-        search: debouncedQuery || undefined,
+    fetchCourses({
+      page,
+      pageSize,
+      category: activeCategory || undefined,
+      search: debouncedQuery || undefined,
+    })
+      .then((result) => {
+        if (!cancelled) {
+          setCourses(result.items)
+          setTotal(result.total)
+        }
       })
-      setCourses(result.items)
-      setTotal(result.total)
-    } catch (e) {
-      console.error('Failed to load courses:', e)
-    } finally {
-      setLoading(false)
-    }
+      .catch((e) => {
+        if (!cancelled) console.error('Failed to load courses:', e)
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => { cancelled = true }
   }, [page, pageSize, activeCategory, debouncedQuery])
-
-  useEffect(() => { loadCourses() }, [loadCourses])
 
   // Reset page when filters change
   useEffect(() => { setPage(1) }, [activeCategory, debouncedQuery])

@@ -22,21 +22,24 @@ export default function CoursePage() {
 
   useEffect(() => {
     if (!id) return
+    let cancelled = false
     setLoading(true)
     setError('')
     fetchCourse(id)
       .then((c) => {
-        if (!c) {
-          setError('课程未找到')
-          return
-        }
+        if (cancelled) return
+        if (!c) { setError('课程未找到'); return }
         setCourse(c)
-        return fetchCourses({ pageSize: 6 }).then((r) => {
-          setRelated(r.items.filter((rc) => rc.category === c.category && rc.slug !== c.slug).slice(0, 4))
+        // Fetch related courses from the same category
+        return fetchCourses({ pageSize: 6, category: c.category || undefined }).then((r) => {
+          if (!cancelled) {
+            setRelated(r.items.filter((rc) => rc.slug !== c.slug).slice(0, 4))
+          }
         })
       })
-      .catch(() => setError('加载失败'))
-      .finally(() => setLoading(false))
+      .catch(() => { if (!cancelled) setError('加载失败') })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
   }, [id])
 
   if (loading) return <CourseSkeleton />

@@ -35,6 +35,7 @@ export default function MyMaterialsPage() {
   }, [])
 
   async function handleDelete(id: string) {
+    if (!window.confirm('确定要删除这份材料吗？此操作不可撤销。')) return
     try {
       await deleteMaterial(id)
       setMaterials((prev) => prev.filter((m) => m.id !== id))
