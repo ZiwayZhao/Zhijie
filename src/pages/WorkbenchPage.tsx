@@ -1,12 +1,14 @@
 import { useState, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, MessageCircle } from 'lucide-react'
 import { getMaterialById, getMaterialsByCourse } from '@/mocks/materials'
 import { getCourseById } from '@/mocks/courses'
 import MaterialReader from '@/components/workbench/MaterialReader'
 import RelatedMaterials from '@/components/workbench/RelatedMaterials'
 import AIToolPanel from '@/components/workbench/AIToolPanel'
+import SocraticChat from '@/components/workbench/SocraticChat'
+import { loadProfile } from '@/lib/student-model'
 
 export default function WorkbenchPage() {
   const { id: courseId, mid } = useParams()
@@ -16,10 +18,13 @@ export default function WorkbenchPage() {
 
   const [specialistMarkdown, setSpecialistMarkdown] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState('original')
+  const [showSocratic, setShowSocratic] = useState(false)
+  const [currentModuleId, setCurrentModuleId] = useState<string | null>(null)
 
-  const handleModuleSelect = useCallback((_moduleId: string, markdown: string) => {
+  const handleModuleSelect = useCallback((moduleId: string, markdown: string) => {
     setSpecialistMarkdown(markdown)
     setActiveTab('specialist')
+    setCurrentModuleId(moduleId)
   }, [])
 
   if (!material || !course) {
@@ -71,6 +76,28 @@ export default function WorkbenchPage() {
           activeTab={activeTab}
           onTabChange={setActiveTab}
         />
+
+        {/* Socratic dialogue toggle */}
+        {specialistMarkdown && currentModuleId && (
+          <div className="mt-6">
+            {showSocratic ? (
+              <SocraticChat
+                moduleId={currentModuleId}
+                moduleName={currentModuleId}
+                mastery={loadProfile().modules[currentModuleId]?.mastery ?? 0.3}
+                onClose={() => setShowSocratic(false)}
+              />
+            ) : (
+              <button
+                onClick={() => setShowSocratic(true)}
+                className="flex items-center gap-2 px-4 py-2.5 border border-border-warm rounded-lg text-sm text-text-muted hover:border-red-primary hover:text-red-primary transition-colors"
+              >
+                <MessageCircle size={16} strokeWidth={1.5} />
+                开启苏格拉底对话
+              </button>
+            )}
+          </div>
+        )}
 
         <RelatedMaterials
           materials={courseMaterials}

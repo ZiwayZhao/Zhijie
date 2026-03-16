@@ -4,8 +4,10 @@
 import { useMemo } from 'react'
 import { motion } from 'framer-motion'
 import { useNavigate } from 'react-router-dom'
+import { Sparkles } from 'lucide-react'
 import type { FlashcardDeck } from '@/lib/fsrs'
 import { getDueCards, State } from '@/lib/fsrs'
+import { loadEvolutionLogs } from '@/lib/card-evolution'
 
 /* ------------------------------------------------------------------ */
 /*  Props                                                              */
@@ -87,6 +89,9 @@ function DeckItem({ deck, index }: { deck: FlashcardDeck; index: number }) {
             {stats.due} 张卡片待复习
           </p>
         )}
+
+        {/* Evolution badge */}
+        <EvolutionBadge courseId={deck.courseId} />
       </div>
 
       <button
@@ -101,6 +106,25 @@ function DeckItem({ deck, index }: { deck: FlashcardDeck; index: number }) {
         {stats.due > 0 ? '开始复习' : '暂无待复习'}
       </button>
     </motion.div>
+  )
+}
+
+function EvolutionBadge({ courseId }: { courseId: string }) {
+  const logs = useMemo(() => loadEvolutionLogs(courseId), [courseId])
+  if (logs.length === 0) return null
+
+  // Show recent evolutions (last 7 days)
+  const recentCount = logs.filter(
+    (l) => Date.now() - l.timestamp < 7 * 24 * 60 * 60 * 1000,
+  ).length
+
+  if (recentCount === 0) return null
+
+  return (
+    <p className="flex items-center gap-1 text-xs text-accent-gold mt-1">
+      <Sparkles size={12} strokeWidth={1.5} />
+      AI 本周优化了 {recentCount} 张卡片
+    </p>
   )
 }
 

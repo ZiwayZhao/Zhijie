@@ -24,6 +24,13 @@ import {
   getMasteryColor,
 } from '@/lib/student-model'
 import type { LearningProfile } from '@/lib/student-model'
+import {
+  detectTriggers,
+  generateSuggestion,
+  applyEvolution,
+  saveEvolutionLog,
+} from '@/lib/card-evolution'
+import type { EvolutionSuggestion } from '@/lib/card-evolution'
 
 /* ------------------------------------------------------------------ */
 /*  Types & Props                                                      */
@@ -47,6 +54,7 @@ interface SessionStats {
   ratings: Record<1 | 2 | 3 | 4, number>
   totalTimeMs: number
   masteryChanges: MasteryChange[]
+  evolutionSuggestions: EvolutionSuggestion[]
 }
 
 const RATINGS: Array<1 | 2 | 3 | 4> = [
@@ -113,7 +121,26 @@ function RatingButton({
   )
 }
 
-function CompletionScreen({ stats, onClose }: { stats: SessionStats; onClose: () => void }) {
+function CompletionScreen({ stats, deck, onClose }: { stats: SessionStats; deck: FlashcardDeck; onClose: () => void }) {
+  const [appliedEvolutions, setAppliedEvolutions] = useState<Set<string>>(new Set())
+
+  function handleApplyEvolution(suggestion: EvolutionSuggestion) {
+    const updated = applyEvolution(deck, suggestion.action)
+    // Update deck in-place for persistence
+    deck.notes = updated.notes
+    deck.cards = updated.cards
+    saveDeck(deck)
+
+    // Log evolution
+    saveEvolutionLog(deck.courseId, {
+      id: `evo-${Date.now()}`,
+      trigger: suggestion.trigger,
+      action: suggestion.action,
+      timestamp: Date.now(),
+    })
+
+    setAppliedEvolutions((prev) => new Set([...prev, suggestion.trigger.cardId]))
+  }
   const correctCount = stats.ratings[Rating.Good as 3] + stats.ratings[Rating.Easy as 4]
   const correctPct = stats.total > 0 ? Math.round((correctCount / stats.total) * 100) : 0
   const avgTimeS = stats.total > 0 ? (stats.totalTimeMs / stats.total / 1000).toFixed(1) : '0'
@@ -142,6 +169,45 @@ function CompletionScreen({ stats, onClose }: { stats: SessionStats; onClose: ()
           valueColor="#A5192E"
         />
       </div>
+
+      {/* Evolution suggestions */}
+      {stats.evolutionSuggestions.length > 0 && (
+        <div className="mb-8 text-left">
+          <h3 className="font-heading text-base text-text-main mb-3">
+            AI 闪卡优化建议
+          </h3>
+          <div className="space-y-2">
+            {stats.evolutionSuggestions.map((suggestion) => {
+              const isApplied = appliedEvolutions.has(suggestion.trigger.cardId)
+              return (
+                <div
+                  key={`${suggestion.trigger.cardId}-${suggestion.trigger.type}`}
+                  className={`flex items-center justify-between border rounded px-3 py-2 ${isApplied ? 'border-green-500/30 bg-green-50' : 'border-border-warm'}`}
+                >
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-text-body">{suggestion.description}</p>
+                    <p className="text-xs text-text-muted mt-0.5">
+                      {suggestion.action.type === 'split' ? '拆分为子卡片' :
+                       suggestion.action.type === 'retire' ? '退役此卡片' :
+                       suggestion.action.type === 'rewrite' ? '改写问法' : '添加记忆提示'}
+                    </p>
+                  </div>
+                  {isApplied ? (
+                    <span className="text-xs text-green-600 shrink-0 ml-3">已应用</span>
+                  ) : (
+                    <button
+                      onClick={() => handleApplyEvolution(suggestion)}
+                      className="text-xs px-2 py-1 rounded border border-red-primary/30 text-red-primary hover:bg-red-primary hover:text-white transition-colors shrink-0 ml-3"
+                    >
+                      应用
+                    </button>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Mastery changes */}
       {stats.masteryChanges.length > 0 && (
@@ -219,10 +285,12 @@ export default function ReviewSession({ deck, dueCards, onComplete }: ReviewSess
     ratings: { 1: 0, 2: 0, 3: 0, 4: 0 },
     totalTimeMs: 0,
     masteryChanges: [],
+    evolutionSuggestions: [],
   })
 
   // BKT profile tracking
   const profileRef = useRef<LearningProfile>(loadProfile())
+  const evolutionQueue = useRef<EvolutionSuggestion[]>([])
   const masterySnapshotRef = useRef<Record<string, number>>({})
 
   // Capture initial mastery snapshot on mount
@@ -307,6 +375,23 @@ export default function ReviewSession({ deck, dueCards, onComplete }: ReviewSess
         saveProfile(profileRef.current)
       }
 
+      // Detect evolution triggers
+      const updatedCard = deck.cards[cardIdx >= 0 ? cardIdx : 0]
+      if (updatedCard) {
+        const triggers = detectTriggers(updatedCard, deck)
+        for (const trigger of triggers) {
+          const triggerNote = deck.notes.find((n) => n.id === trigger.noteId)
+          if (triggerNote) {
+            const existing = evolutionQueue.current.find(
+              (s) => s.trigger.cardId === trigger.cardId && s.trigger.type === trigger.type,
+            )
+            if (!existing) {
+              evolutionQueue.current.push(generateSuggestion(trigger, triggerNote))
+            }
+          }
+        }
+      }
+
       // Update stats
       setStats((prev) => ({
         ...prev,
@@ -330,7 +415,11 @@ export default function ReviewSession({ deck, dueCards, onComplete }: ReviewSess
             })
           }
         }
-        setStats((prev) => ({ ...prev, masteryChanges: changes }))
+        setStats((prev) => ({
+          ...prev,
+          masteryChanges: changes,
+          evolutionSuggestions: [...evolutionQueue.current],
+        }))
         setCompleted(true)
       } else {
         setIsFlipped(false)
@@ -341,7 +430,7 @@ export default function ReviewSession({ deck, dueCards, onComplete }: ReviewSess
   )
 
   if (completed) {
-    return <CompletionScreen stats={stats} onClose={onComplete} />
+    return <CompletionScreen stats={stats} deck={deck} onClose={onComplete} />
   }
 
   if (!currentNote || !choices) {
