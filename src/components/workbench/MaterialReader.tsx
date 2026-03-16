@@ -1,6 +1,8 @@
-import { useMemo } from 'react'
+import { useMemo, lazy, Suspense } from 'react'
 import { motion } from 'framer-motion'
-import { FileText, Calendar, User, BookOpen } from 'lucide-react'
+import { FileText, Calendar, User, BookOpen, Loader2 } from 'lucide-react'
+
+const PdfAnnotator = lazy(() => import('./PdfAnnotator'))
 import ReactMarkdown from 'react-markdown'
 import remarkMath from 'remark-math'
 import remarkGfm from 'remark-gfm'
@@ -96,13 +98,16 @@ export default function MaterialReader({ material }: MaterialReaderProps) {
 
       {/* Content area */}
       {isPdf && pdfUrl ? (
-        <div className="w-full rounded-md overflow-hidden border border-border-warm" style={{ height: '80vh' }}>
-          <iframe
-            src={pdfUrl}
-            className="w-full h-full border-0"
-            title={`PDF: ${material.name}`}
-          />
-        </div>
+        <Suspense
+          fallback={
+            <div className="flex items-center justify-center h-[80vh] gap-2 text-text-muted">
+              <Loader2 size={20} className="animate-spin" />
+              <span className="text-sm">加载 PDF 阅读器...</span>
+            </div>
+          }
+        >
+          <PdfAnnotator pdfUrl={pdfUrl} materialId={material.id} />
+        </Suspense>
       ) : (
         <div className="prose-academic">
           <ReactMarkdown
