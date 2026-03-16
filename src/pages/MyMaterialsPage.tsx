@@ -31,10 +31,12 @@ export default function MyMaterialsPage() {
     : userMaterials.filter((m) => m.type === filter)
 
   return (
-    <div className="p-8 max-w-4xl">
+    <div className="p-8 max-w-4xl mx-auto">
       <motion.div initial="hidden" animate="visible" variants={fadeUp} custom={0}>
-        <h1 className="font-heading text-3xl text-text-main">我的材料</h1>
-        <p className="text-sm text-text-muted mt-2">你上传的所有学习材料</p>
+        <div className="border-l-3 border-l-red-primary pl-4 mb-8">
+          <h1 className="font-heading text-3xl text-text-main">我的材料</h1>
+          <p className="text-text-muted mt-1">你上传的所有学习材料</p>
+        </div>
       </motion.div>
 
       {userMaterials.length === 0 ? (
@@ -56,7 +58,7 @@ export default function MyMaterialsPage() {
       ) : (
         <>
           {/* Filter tabs */}
-          <div className="flex gap-1 border-b border-border-warm mt-6 mb-5">
+          <div className="flex gap-1 border-b border-border-warm mb-5">
             {types.map((t) => (
               <button
                 key={t}

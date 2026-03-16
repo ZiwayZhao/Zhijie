@@ -70,7 +70,7 @@ function CourseCard({ course, index }: { course: Course; index: number }) {
           {course.tags.map((tag) => (
             <span
               key={tag}
-              className="text-[11px] px-1.5 py-0.5 rounded-sm bg-bg-accent text-text-muted"
+              className="text-[11px] px-1.5 py-0.5 border border-border-warm text-text-muted bg-bg-main"
             >
               {tag}
             </span>

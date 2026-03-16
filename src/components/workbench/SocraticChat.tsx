@@ -4,7 +4,7 @@
  * Scaffold level driven by mastery (ZPD).
  */
 import { useState, useRef, useEffect } from 'react'
-import { motion } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion'
 import { Send, Lightbulb, Eye, X } from 'lucide-react'
 import { getScaffoldLevel } from '@/lib/student-model'
 import type { ScaffoldLevel } from '@/lib/student-model'
@@ -220,6 +220,29 @@ function generateSocraticResponse(
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
 
+/** Typing indicator — three dots with staggered pulse */
+function TypingIndicator() {
+  return (
+    <div className="border-l-3 border-l-red-primary pl-4 py-1">
+      <div className="flex items-center gap-1.5 h-6">
+        {[0, 1, 2].map((i) => (
+          <motion.span
+            key={i}
+            className="w-1.5 h-1.5 rounded-full bg-text-muted"
+            animate={{ opacity: [0.3, 1, 0.3], y: [0, -3, 0] }}
+            transition={{
+              duration: 1,
+              repeat: Infinity,
+              delay: i * 0.15,
+              ease: 'easeInOut',
+            }}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export default function SocraticChat({ moduleName, mastery, onClose }: SocraticChatProps) {
   const scaffold = getScaffoldLevel(mastery)
   const meta = scaffoldMeta[scaffold]
@@ -232,11 +255,12 @@ export default function SocraticChat({ moduleName, mastery, onClose }: SocraticC
     },
   ])
   const [input, setInput] = useState('')
+  const [isTyping, setIsTyping] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+  }, [messages, isTyping])
 
   function handleSend() {
     const text = input.trim()
@@ -250,11 +274,13 @@ export default function SocraticChat({ moduleName, mastery, onClose }: SocraticC
 
     setMessages((prev) => [...prev, userMsg])
     setInput('')
+    setIsTyping(true)
 
     setTimeout(() => {
       const response = generateSocraticResponse(text, moduleName, scaffold)
+      setIsTyping(false)
       setMessages((prev) => [...prev, response])
-    }, 600)
+    }, 800)
   }
 
   function handleReveal(msgId: string) {
@@ -382,6 +408,18 @@ export default function SocraticChat({ moduleName, mastery, onClose }: SocraticC
             )}
           </motion.div>
         ))}
+        <AnimatePresence>
+          {isTyping && (
+            <motion.div
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.15 }}
+            >
+              <TypingIndicator />
+            </motion.div>
+          )}
+        </AnimatePresence>
         <div ref={messagesEndRef} />
       </div>
 

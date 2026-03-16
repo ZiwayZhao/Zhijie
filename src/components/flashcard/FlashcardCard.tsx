@@ -78,10 +78,13 @@ export default function FlashcardCard({ note, flipped: controlledFlipped, onFlip
   const badge = typeLabel[note.type]
 
   return (
-    <div
+    <motion.div
       className="w-full max-w-lg mx-auto cursor-pointer select-none"
       style={{ perspective: 1200 }}
       onClick={handleClick}
+      whileHover={{ scale: 1.02 }}
+      whileTap={{ scale: 0.98 }}
+      transition={{ type: 'tween', duration: 0.15 }}
     >
       <motion.div
         className="relative w-full"
@@ -175,6 +178,6 @@ export default function FlashcardCard({ note, flipped: controlledFlipped, onFlip
           </div>
         </div>
       </motion.div>
-    </div>
+    </motion.div>
   )
 }

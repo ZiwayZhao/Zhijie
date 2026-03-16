@@ -1,7 +1,7 @@
 /**
  * AgendaItem — renders a single agenda entry with type-specific styling.
  */
-import { motion } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion'
 import { Link } from 'react-router-dom'
 import { AlertTriangle, Brain, BookOpen, CheckCircle, Award, Square, CheckSquare } from 'lucide-react'
 import type { AgendaItem as AgendaItemType } from '@/lib/agenda-engine'
@@ -89,22 +89,48 @@ export default function AgendaItem({ item, index, onToggleComplete }: AgendaItem
   const isTodo = item.type === 'todo'
 
   const content = (
-    <div className={`flex items-start gap-3 py-3 ${isCompleted ? 'opacity-40' : ''}`}>
+    <motion.div
+      className="flex items-start gap-3 py-3"
+      animate={{ opacity: isCompleted ? 0.4 : 1 }}
+      transition={{ duration: 0.3 }}
+    >
       {/* Left dot / checkbox */}
       {isTodo ? (
-        <button
+        <motion.button
           onClick={(e) => {
             e.preventDefault()
             e.stopPropagation()
             onToggleComplete?.(item.id)
           }}
+          whileTap={{ scale: 0.8 }}
           className="mt-0.5 shrink-0 text-text-muted hover:text-red-primary transition-colors duration-150"
         >
-          {isCompleted
-            ? <CheckSquare size={16} strokeWidth={1.5} />
-            : <Square size={16} strokeWidth={1.5} />
-          }
-        </button>
+          <AnimatePresence mode="wait" initial={false}>
+            {isCompleted ? (
+              <motion.span
+                key="checked"
+                initial={{ scale: 0.5, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.5, opacity: 0 }}
+                transition={{ type: 'spring', stiffness: 500, damping: 25 }}
+                className="block text-red-primary"
+              >
+                <CheckSquare size={16} strokeWidth={1.5} />
+              </motion.span>
+            ) : (
+              <motion.span
+                key="unchecked"
+                initial={{ scale: 0.5, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.5, opacity: 0 }}
+                transition={{ duration: 0.15 }}
+                className="block"
+              >
+                <Square size={16} strokeWidth={1.5} />
+              </motion.span>
+            )}
+          </AnimatePresence>
+        </motion.button>
       ) : (
         <div className={`w-2 h-2 rounded-full ${config.dotColor} mt-1.5 shrink-0`} />
       )}
@@ -133,7 +159,7 @@ export default function AgendaItem({ item, index, onToggleComplete }: AgendaItem
           重点
         </span>
       )}
-    </div>
+    </motion.div>
   )
 
   return (
