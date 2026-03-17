@@ -20,6 +20,9 @@ export const STORAGE_KEYS = {
   /** Exam configurations */
   EXAM_CONFIGS: 'zhijie_exam_configs',
 
+  /** Enrolled course slugs */
+  ENROLLED_COURSES: 'zhijie_enrolled_courses',
+
   /** User-uploaded materials */
   USER_MATERIALS: 'zhijie_user_materials',
 

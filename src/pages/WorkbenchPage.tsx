@@ -1,9 +1,9 @@
-import { useState, useCallback } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { ArrowLeft, MessageCircle, BookOpen } from 'lucide-react'
+import { ArrowLeft, MessageCircle, BookOpen, Loader2 } from 'lucide-react'
 import { getMaterialById, getMaterialsByCourse } from '@/mocks/materials'
-import { getCourseById } from '@/mocks/courses'
+import { fetchCourse, type CourseItem } from '@/lib/api'
 import MaterialReader from '@/components/workbench/MaterialReader'
 import RelatedMaterials from '@/components/workbench/RelatedMaterials'
 import AIToolPanel from '@/components/workbench/AIToolPanel'
@@ -15,14 +15,26 @@ import type { MCQuestion } from '@/lib/api'
 export default function WorkbenchPage() {
   const { id: courseId, mid } = useParams()
   const material = mid ? getMaterialById(mid) : undefined
-  const course = courseId ? getCourseById(courseId) : undefined
   const courseMaterials = courseId ? getMaterialsByCourse(courseId) : []
 
+  const [course, setCourse] = useState<CourseItem | null>(null)
+  const [courseLoading, setCourseLoading] = useState(true)
   const [specialistMarkdown, setSpecialistMarkdown] = useState<string | null>(null)
   const [quizQuestions, setQuizQuestions] = useState<MCQuestion[]>([])
   const [activeTab, setActiveTab] = useState('original')
   const [showSocratic, setShowSocratic] = useState(false)
   const [currentModuleId, setCurrentModuleId] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!courseId) {
+      setCourseLoading(false)
+      return
+    }
+    fetchCourse(courseId)
+      .then((c) => setCourse(c))
+      .catch(() => {})
+      .finally(() => setCourseLoading(false))
+  }, [courseId])
 
   const handleModuleSelect = useCallback((moduleId: string, markdown: string) => {
     setSpecialistMarkdown(markdown)
@@ -33,6 +45,15 @@ export default function WorkbenchPage() {
   const handleQuizReady = useCallback((questions: MCQuestion[]) => {
     setQuizQuestions(questions)
   }, [])
+
+  if (courseLoading) {
+    return (
+      <div className="flex items-center justify-center h-64 gap-2 text-text-muted">
+        <Loader2 size={20} className="animate-spin" />
+        <span className="text-sm">加载中...</span>
+      </div>
+    )
+  }
 
   if (!material || !course) {
     return (
@@ -68,7 +89,7 @@ export default function WorkbenchPage() {
           </Link>
           <span className="text-border-warm">/</span>
           <Link
-            to={`/course/${courseId}`}
+            to={`/course/${course.slug}`}
             className="hover:text-text-body transition-colors no-underline text-text-muted"
           >
             {course.name}
@@ -80,6 +101,8 @@ export default function WorkbenchPage() {
         <ErrorBoundary>
           <MaterialReader
             material={material}
+            courseName={course.name}
+            courseSchool={course.school}
             specialistMarkdown={specialistMarkdown}
             quizQuestions={quizQuestions}
             activeTab={activeTab}
@@ -129,7 +152,7 @@ export default function WorkbenchPage() {
         <RelatedMaterials
           materials={courseMaterials}
           currentId={material.id}
-          courseId={course.id}
+          courseId={course.slug}
         />
       </motion.div>
 

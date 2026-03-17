@@ -10,7 +10,6 @@ import remarkGfm from 'remark-gfm'
 import rehypeKatex from 'rehype-katex'
 import type { Material } from '@/mocks/materials'
 import { materialContent } from '@/mocks/materials'
-import { getCourseById } from '@/mocks/courses'
 import type { MCQuestion } from '@/lib/api'
 import QuizPanel from '@/components/workbench/QuizPanel'
 
@@ -18,6 +17,8 @@ import QuizPanel from '@/components/workbench/QuizPanel'
 
 interface MaterialReaderProps {
   material: Material
+  courseName?: string
+  courseSchool?: string
   specialistMarkdown?: string | null
   quizQuestions?: MCQuestion[]
   activeTab?: string
@@ -51,6 +52,8 @@ function fixMarkdown(md: string): string {
 
 export default function MaterialReader({
   material,
+  courseName,
+  courseSchool,
   specialistMarkdown,
   quizQuestions,
   activeTab: controlledTab,
@@ -61,7 +64,9 @@ export default function MaterialReader({
   const activeTab = controlledTab ?? internalTab
   const setActiveTab = onTabChange ?? setInternalTab
 
-  const course = getCourseById(material.courseId)
+  const courseInfo = (courseName || courseSchool)
+    ? { name: courseName || '', school: courseSchool || '' }
+    : null
   const isPdf = material.fileType === 'application/pdf'
 
   const pdfUrl = useMemo(() => {
@@ -98,7 +103,7 @@ export default function MaterialReader({
       className="space-y-6"
     >
       {/* Material header */}
-      <MaterialHeader material={material} course={course} />
+      <MaterialHeader material={material} courseInfo={courseInfo} />
 
       {/* Tab bar */}
       <TabBar tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />
@@ -132,10 +137,10 @@ export default function MaterialReader({
 
 function MaterialHeader({
   material,
-  course,
+  courseInfo,
 }: {
   material: Material
-  course: ReturnType<typeof getCourseById>
+  courseInfo: { name: string; school: string } | null
 }) {
   return (
     <header className="border-b border-border-warm pb-8">
@@ -164,10 +169,10 @@ function MaterialHeader({
           <FileText size={13} strokeWidth={1.5} />
           {material.fileSize}
         </span>
-        {course && (
+        {courseInfo && (
           <span className="flex items-center gap-1.5 italic">
             <BookOpen size={13} strokeWidth={1.5} />
-            {course.name} — {course.school}
+            {courseInfo.name}{courseInfo.school ? ` — ${courseInfo.school}` : ''}
           </span>
         )}
       </div>

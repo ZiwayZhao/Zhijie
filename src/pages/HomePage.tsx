@@ -6,8 +6,9 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { motion, type Variants } from 'framer-motion'
 import { Clock, Flame, BookOpen, FileCheck, Upload, PenLine, Award } from 'lucide-react'
-import { recentCourses, activities, studyStats } from '@/mocks/activities'
+import { activities, studyStats } from '@/mocks/activities'
 import type { Activity } from '@/mocks/activities'
+import { fetchCourses, type CourseItem } from '@/lib/api'
 import type { DailyAgenda, TodoItem, ExamConfig } from '@/lib/agenda-engine'
 import { generateDailyAgenda, loadExamConfigs, loadTodos, saveTodos } from '@/lib/agenda-engine'
 import { loadAllDecks } from '@/lib/fsrs'
@@ -150,33 +151,43 @@ function WelcomeSection() {
 }
 
 function RecentCoursesSection() {
+  const [courses, setCourses] = useState<CourseItem[]>([])
+
+  useEffect(() => {
+    fetchCourses({ pageSize: 6 })
+      .then(({ items }) => setCourses(items))
+      .catch(() => {})
+  }, [])
+
+  if (courses.length === 0) return null
+
   return (
     <motion.section initial="hidden" animate="visible" variants={fadeUp} custom={4} className="min-w-0">
       <div className="flex items-center gap-3 mb-5">
         <div className="w-8 h-[2px] bg-red-primary rounded-full" />
-        <h2 className="font-heading text-xl text-text-main">最近学习</h2>
+        <h2 className="font-heading text-xl text-text-main">热门课程</h2>
       </div>
       <div className="flex gap-5 overflow-x-auto pb-2 min-w-0">
-        {recentCourses.map((c, i) => (
-          <motion.div key={c.id} variants={fadeUp} custom={i + 5} className="shrink-0">
+        {courses.map((c, i) => (
+          <motion.div key={c.slug} variants={fadeUp} custom={i + 5} className="shrink-0">
             <Link
-              to={`/course/${c.id}`}
+              to={`/course/${c.slug}`}
               className="group block w-56 border border-border-warm rounded-md bg-bg-card p-5
                          hover:border-red-primary/60 transition-all duration-200 no-underline"
             >
-              <h3 className="font-heading text-base text-text-main mb-1 group-hover:text-red-primary transition-colors duration-200">
+              <h3 className="font-heading text-base text-text-main mb-1 group-hover:text-red-primary transition-colors duration-200 line-clamp-2">
                 {c.name}
               </h3>
-              <p className="text-xs text-text-muted mb-4 font-body">{c.school}</p>
-              <div className="w-full h-1 rounded-full bg-bg-accent overflow-hidden">
-                <div
-                  className="h-full rounded-full bg-red-primary transition-all"
-                  style={{ width: `${c.progress}%` }}
-                />
-              </div>
-              <div className="flex justify-between mt-2.5 text-xs text-text-muted font-body">
-                <span>进度 {c.progress}%</span>
-                <span>{c.lastVisit}</span>
+              <p className="text-xs text-text-muted mb-4 font-body">{c.school || c.category}</p>
+              <div className="flex flex-wrap gap-1 mt-2">
+                {c.tags.slice(0, 3).map((tag) => (
+                  <span
+                    key={tag}
+                    className="text-[10px] px-1.5 py-0.5 border border-border-warm text-text-muted bg-bg-main"
+                  >
+                    {tag}
+                  </span>
+                ))}
               </div>
             </Link>
           </motion.div>

@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { Sparkles, ChevronDown } from 'lucide-react'
-import { courses } from '@/mocks/courses'
+import { Sparkles, ChevronDown, Loader2 } from 'lucide-react'
+import { fetchCourses, type CourseItem } from '@/lib/api'
 
 export interface ClassifyData {
   courseId: string
@@ -29,6 +29,25 @@ export default function ClassifyForm({ fileCount, onSubmit }: ClassifyFormProps)
   const [tags, setTags] = useState<string[]>(aiSuggestedTags)
   const [description, setDescription] = useState('')
   const [tagInput, setTagInput] = useState('')
+
+  const [courseList, setCourseList] = useState<CourseItem[]>([])
+  const [courseLoading, setCourseLoading] = useState(true)
+  const [searchTerm, setSearchTerm] = useState('')
+
+  useEffect(() => {
+    fetchCourses({ pageSize: 100 })
+      .then(({ items }) => setCourseList(items))
+      .catch(() => {})
+      .finally(() => setCourseLoading(false))
+  }, [])
+
+  const filteredCourses = searchTerm
+    ? courseList.filter(
+        (c) =>
+          c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          c.school.toLowerCase().includes(searchTerm.toLowerCase()),
+      )
+    : courseList
 
   function handleRemoveTag(tag: string) {
     setTags(tags.filter((t) => t !== tag))
@@ -72,23 +91,39 @@ export default function ClassifyForm({ fileCount, onSubmit }: ClassifyFormProps)
 
       {/* Course select */}
       <Field label="所属课程">
+        <input
+          type="text"
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          placeholder="搜索课程名称..."
+          className="input-field mb-2"
+        />
         <div className="relative">
-          <select
-            value={courseId}
-            onChange={(e) => setCourseId(e.target.value)}
-            className="input-field appearance-none pr-8"
-          >
-            <option value="">选择课程...</option>
-            {courses.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name} — {c.school}
-              </option>
-            ))}
-          </select>
-          <ChevronDown
-            size={14}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none"
-          />
+          {courseLoading ? (
+            <div className="flex items-center gap-2 py-2 text-text-muted text-sm">
+              <Loader2 size={14} className="animate-spin" />
+              加载课程列表...
+            </div>
+          ) : (
+            <>
+              <select
+                value={courseId}
+                onChange={(e) => setCourseId(e.target.value)}
+                className="input-field appearance-none pr-8"
+              >
+                <option value="">选择课程...</option>
+                {filteredCourses.map((c) => (
+                  <option key={c.slug} value={c.slug}>
+                    {c.name}{c.school ? ` — ${c.school}` : ''}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown
+                size={14}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none"
+              />
+            </>
+          )}
         </div>
       </Field>
 
