@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Search, User, LogOut, ChevronDown } from 'lucide-react'
+import { Search, User, LogOut, ChevronDown, Menu } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 
@@ -15,7 +15,7 @@ const pageTitles: Record<string, string> = {
   '/settings': '设置',
 }
 
-export default function Header() {
+export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) {
   const location = useLocation()
   const navigate = useNavigate()
   const { user, isAuthenticated, logout } = useAuth()
@@ -42,9 +42,17 @@ export default function Header() {
   }
 
   return (
-    <header className="flex items-center justify-between px-10 py-4 border-b border-border-warm bg-bg-card">
+    <header className="flex items-center justify-between px-4 lg:px-10 py-4 border-b border-border-warm bg-bg-card">
       {/* Page title — serif with decorative accent */}
       <div className="flex items-center gap-3">
+        {onMenuToggle && (
+          <button
+            onClick={onMenuToggle}
+            className="lg:hidden p-1 text-text-muted hover:text-text-main transition-colors"
+          >
+            <Menu size={20} strokeWidth={1.5} />
+          </button>
+        )}
         <div className="w-5 h-[2px] bg-red-primary rounded-full" />
         <h2 className="font-heading text-xl text-text-main m-0 tracking-tight">{title}</h2>
       </div>
