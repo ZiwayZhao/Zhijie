@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { motion, type Variants } from 'framer-motion'
-import { BookMarked, Users, Star, Globe, ExternalLink, Upload, Clock, Code2, GraduationCap } from 'lucide-react'
-import { fetchCourse, fetchCourses, type CourseItem } from '@/lib/api'
+import { BookMarked, Users, Star, Globe, ExternalLink, Upload, Clock, Code2, GraduationCap, FileText, Video, FileCode, File } from 'lucide-react'
+import { fetchCourse, fetchCourses, fetchCourseResources, type CourseItem, type CourseResourceItem } from '@/lib/api'
 
 /** Only allow http/https URLs to prevent javascript:/data: XSS */
 function isSafeUrl(url: string): boolean {
@@ -27,6 +27,8 @@ export default function CoursePage() {
   const { id } = useParams<{ id: string }>()
   const [course, setCourse] = useState<CourseItem | null>(null)
   const [related, setRelated] = useState<CourseItem[]>([])
+  const [resources, setResources] = useState<CourseResourceItem[]>([])
+  const [resourceTotal, setResourceTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -40,14 +42,18 @@ export default function CoursePage() {
         if (cancelled) return
         if (!c) { setError('课程未找到'); return }
         setCourse(c)
-        // Fetch related courses (failure here should not affect main course display)
-        fetchCourses({ pageSize: 6, category: c.categorySlug || undefined })
-          .then((r) => {
-            if (!cancelled) {
-              setRelated(r.items.filter((rc) => rc.slug !== c.slug).slice(0, 4))
-            }
-          })
-          .catch(() => { /* related courses failure is non-critical */ })
+        // Fetch related courses + resources in parallel
+        Promise.all([
+          fetchCourses({ pageSize: 6, category: c.categorySlug || undefined })
+            .catch(() => ({ items: [] as CourseItem[], total: 0 })),
+          fetchCourseResources(id, { pageSize: 100 })
+            .catch(() => ({ items: [] as CourseResourceItem[], total: 0 })),
+        ]).then(([relatedResult, resourceResult]) => {
+          if (cancelled) return
+          setRelated(relatedResult.items.filter((rc) => rc.slug !== c.slug).slice(0, 4))
+          setResources(resourceResult.items)
+          setResourceTotal(resourceResult.total)
+        })
       })
       .catch(() => { if (!cancelled) setError('加载失败') })
       .finally(() => { if (!cancelled) setLoading(false) })
@@ -72,8 +78,8 @@ export default function CoursePage() {
     <div className="p-8 lg:p-10 max-w-6xl">
       <CourseHeader course={course} />
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-10 mt-10">
-        <CourseContent course={course} />
-        <CourseSidebar course={course} related={related} />
+        <CourseContent course={course} resources={resources} resourceTotal={resourceTotal} />
+        <CourseSidebar course={course} related={related} resourceTotal={resourceTotal} />
       </div>
     </div>
   )
@@ -151,16 +157,77 @@ function CourseHeader({ course }: { course: CourseItem }) {
   )
 }
 
-function CourseContent({ course }: { course: CourseItem }) {
+const resourceIcon: Record<string, typeof FileText> = {
+  pdf: FileText,
+  video: Video,
+  page: FileCode,
+}
+
+function CourseContent({
+  course,
+  resources,
+  resourceTotal,
+}: {
+  course: CourseItem
+  resources: CourseResourceItem[]
+  resourceTotal: number
+}) {
+  // Group resources by content_feature
+  const grouped = resources.reduce<Record<string, CourseResourceItem[]>>((acc, r) => {
+    const key = r.contentFeature || '其他资料'
+    ;(acc[key] ??= []).push(r)
+    return acc
+  }, {})
+  const groupKeys = Object.keys(grouped).sort()
+
   return (
     <motion.section initial="hidden" animate="visible" variants={fadeUp} custom={1}>
+      {/* External links */}
+      {(course.websiteUrl || course.videoUrl) && (
+        <div className="mb-8">
+          <span className="text-[10px] tracking-widest uppercase text-text-muted font-body">
+            Official Links
+          </span>
+          <h2 className="font-heading text-xl text-text-main mt-0.5 mb-4">
+            课程链接
+          </h2>
+          <div className="flex gap-3 flex-wrap">
+            {course.websiteUrl && isSafeUrl(course.websiteUrl) && (
+              <a
+                href={course.websiteUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 px-4 py-2.5 text-sm border border-border-warm
+                           rounded-sm bg-bg-card hover:border-red-primary transition-colors no-underline text-text-body"
+              >
+                <ExternalLink size={14} className="text-red-primary" />
+                课程官网
+              </a>
+            )}
+            {course.videoUrl && isSafeUrl(course.videoUrl) && (
+              <a
+                href={course.videoUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 px-4 py-2.5 text-sm border border-border-warm
+                           rounded-sm bg-bg-card hover:border-red-primary transition-colors no-underline text-text-body"
+              >
+                <Video size={14} className="text-red-primary" />
+                课程视频
+              </a>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Course resources from OCW / scraped sources */}
       <div className="flex items-center justify-between mb-4">
         <div>
           <span className="text-[10px] tracking-widest uppercase text-text-muted font-body">
-            Materials
+            Course Materials
           </span>
           <h2 className="font-heading text-xl text-text-main mt-0.5">
-            课程材料
+            课程材料 <span className="text-base text-text-muted font-body">({resourceTotal})</span>
           </h2>
         </div>
         <Link
@@ -174,50 +241,49 @@ function CourseContent({ course }: { course: CourseItem }) {
         </Link>
       </div>
 
-      {course.materialCount > 0 ? (
-        <p className="text-sm text-text-muted py-8 text-center italic">
-          {course.materialCount} 份材料将在材料系统接入后显示
-        </p>
+      {resourceTotal > 0 ? (
+        <div className="space-y-6">
+          {groupKeys.map((group) => (
+            <div key={group}>
+              <h3 className="text-sm font-medium text-text-main mb-2 flex items-center gap-2">
+                <div className="w-5 h-[2px] bg-red-primary rounded-full" />
+                {group}
+                <span className="text-xs text-text-muted font-body">({grouped[group].length})</span>
+              </h3>
+              <div className="space-y-1">
+                {grouped[group].map((r) => {
+                  const Icon = resourceIcon[r.contentType] || File
+                  return (
+                    <a
+                      key={r.id}
+                      href={r.sourceUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="group flex items-center gap-3 px-4 py-2.5 border border-border-warm rounded-sm
+                                 bg-bg-card hover:border-red-primary transition-colors no-underline"
+                    >
+                      <Icon size={16} strokeWidth={1.5} className="text-text-muted group-hover:text-red-primary transition-colors shrink-0" />
+                      <span className="text-sm text-text-body group-hover:text-red-primary transition-colors truncate">
+                        {r.title}
+                      </span>
+                      {r.fileExtension && (
+                        <span className="ml-auto text-[10px] px-1.5 py-0.5 border border-border-warm text-text-muted bg-bg-main shrink-0 uppercase">
+                          {r.fileExtension.replace('.', '')}
+                        </span>
+                      )}
+                      <ExternalLink size={12} className="text-text-muted group-hover:text-red-primary transition-colors shrink-0" />
+                    </a>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
       ) : (
         <div className="py-12 text-center border border-border-warm rounded-sm bg-bg-card">
           <GraduationCap size={32} className="mx-auto text-text-muted mb-3" strokeWidth={1} />
           <p className="text-text-muted text-sm">暂无材料</p>
           <p className="text-text-muted text-xs mt-1">上传第一份学习材料，开始AI分析之旅</p>
-        </div>
-      )}
-
-      {(course.websiteUrl || course.videoUrl) && (
-        <div className="mt-8">
-          <span className="text-[10px] tracking-widest uppercase text-text-muted font-body">
-            Resources
-          </span>
-          <h2 className="font-heading text-xl text-text-main mt-0.5 mb-4">
-            课程资源
-          </h2>
-          <div className="space-y-3">
-            {course.websiteUrl && isSafeUrl(course.websiteUrl) && (
-              <a
-                href={course.websiteUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-2 text-sm text-red-primary hover:underline"
-              >
-                <ExternalLink size={14} />
-                课程官网
-              </a>
-            )}
-            {course.videoUrl && isSafeUrl(course.videoUrl) && (
-              <a
-                href={course.videoUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-2 text-sm text-red-primary hover:underline"
-              >
-                <ExternalLink size={14} />
-                课程视频
-              </a>
-            )}
-          </div>
         </div>
       )}
 
@@ -236,7 +302,7 @@ function CourseContent({ course }: { course: CourseItem }) {
   )
 }
 
-function CourseSidebar({ course, related }: { course: CourseItem; related: CourseItem[] }) {
+function CourseSidebar({ course, related, resourceTotal }: { course: CourseItem; related: CourseItem[]; resourceTotal: number }) {
   return (
     <motion.aside
       initial="hidden"
@@ -288,7 +354,7 @@ function CourseSidebar({ course, related }: { course: CourseItem; related: Cours
             <span className="text-text-muted flex items-center gap-1.5">
               <BookMarked size={13} strokeWidth={1.5} className="text-red-primary" /> 材料
             </span>
-            <span className="font-heading text-lg text-text-main">{course.materialCount}</span>
+            <span className="font-heading text-lg text-text-main">{resourceTotal || course.materialCount}</span>
           </div>
           <div className="h-px bg-border-warm" />
           <div className="flex justify-between items-center">

@@ -5,7 +5,7 @@ Usage:
 
     client = get_llm_client()
     result = await client.structured_output(
-        model="anthropic/claude-sonnet-4-5-20250514",
+        model="anthropic/claude-sonnet-4.5",
         system="You are...",
         messages=[{"role": "user", "content": "..."}],
         response_schema=MyPydanticModel,
@@ -89,7 +89,7 @@ class LLMClient:
         then validates with Pydantic as a second layer.
 
         Args:
-            model: Model ID (OpenRouter format, e.g. "anthropic/claude-sonnet-4-5-20250514").
+            model: Model ID (OpenRouter format, e.g. "anthropic/claude-sonnet-4.5").
             system: System prompt.
             messages: Conversation messages.
             response_schema: Pydantic model class for the response.

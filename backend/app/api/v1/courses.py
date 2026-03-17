@@ -7,11 +7,12 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
-from app.models.course import Course, CourseCategory
+from app.models.course import Course, CourseCategory, CourseMaterialSource
 from app.schemas.course import (
     CategoryListResponse,
     CategoryResponse,
     CourseListResponse,
+    CourseMaterialSourceResponse,
     CourseResponse,
 )
 
@@ -146,3 +147,43 @@ async def get_course(
         resp.category_name = course.category.name
         resp.category_slug = course.category.slug
     return resp
+
+
+@router.get("/{slug}/resources")
+async def list_course_resources(
+    slug: str,
+    db: AsyncSession = Depends(get_db),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    content_type: str | None = Query(None, description="Filter by content type (pdf, video, page)"),
+):
+    """List external material sources for a course (OCW PDFs, etc.)."""
+    # Find course by slug
+    course_stmt = select(Course.id).where(Course.slug == slug)
+    course_result = await db.execute(course_stmt)
+    course_id = course_result.scalar_one_or_none()
+    if course_id is None:
+        raise HTTPException(status_code=404, detail="Course not found")
+
+    # Build query
+    stmt = select(CourseMaterialSource).where(
+        CourseMaterialSource.course_id == course_id
+    )
+    if content_type:
+        stmt = stmt.where(CourseMaterialSource.content_type == content_type)
+
+    # Count
+    count_stmt = select(func.count()).select_from(stmt.subquery())
+    total = (await db.execute(count_stmt)).scalar() or 0
+
+    # Paginate
+    offset = (page - 1) * page_size
+    stmt = stmt.order_by(
+        CourseMaterialSource.content_feature,
+        CourseMaterialSource.title,
+    ).offset(offset).limit(page_size)
+    result = await db.execute(stmt)
+    sources = result.scalars().all()
+
+    items = [CourseMaterialSourceResponse.model_validate(s) for s in sources]
+    return {"items": items, "total": total, "page": page, "page_size": page_size}

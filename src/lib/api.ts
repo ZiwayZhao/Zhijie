@@ -139,6 +139,52 @@ export async function fetchCategories(): Promise<CategoryItem[]> {
   }))
 }
 
+/* ---------- Course Resource Sources API ---------- */
+
+export interface CourseResourceItem {
+  id: string
+  courseId: string
+  title: string
+  sourceUrl: string
+  contentType: string
+  contentFeature: string | null
+  fileExtension: string | null
+  downloadUrl: string | null
+  downloaded: boolean
+  license: string | null
+  attribution: string | null
+}
+
+export async function fetchCourseResources(
+  slug: string,
+  opts: { page?: number; pageSize?: number; contentType?: string } = {},
+): Promise<{ items: CourseResourceItem[]; total: number }> {
+  const params = new URLSearchParams()
+  if (opts.page != null) params.set('page', String(opts.page))
+  if (opts.pageSize != null) params.set('page_size', String(opts.pageSize))
+  if (opts.contentType) params.set('content_type', opts.contentType)
+
+  const res = await fetch(`${AUTH_API}/courses/${encodeURIComponent(slug)}/resources?${params}`)
+  if (!res.ok) throw new Error(`Resources fetch failed: ${res.status}`)
+  const data = await res.json()
+  return {
+    items: data.items.map((r: any) => ({
+      id: r.id,
+      courseId: r.course_id,
+      title: r.title,
+      sourceUrl: r.source_url,
+      contentType: r.content_type,
+      contentFeature: r.content_feature || null,
+      fileExtension: r.file_extension || null,
+      downloadUrl: r.download_url || null,
+      downloaded: r.downloaded ?? false,
+      license: r.license || null,
+      attribution: r.attribution || null,
+    })),
+    total: data.total,
+  }
+}
+
 /* ---------- Material Upload API ---------- */
 
 export interface MaterialItem {

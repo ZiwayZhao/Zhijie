@@ -14,7 +14,7 @@ from app.services.pipeline.cartographer import CartographerResult
 logger = logging.getLogger(__name__)
 
 PROMPT_VERSION = "exam_v1"
-MODEL = "anthropic/claude-sonnet-4-5-20250514"
+MODEL = "anthropic/claude-sonnet-4.5"
 
 
 # ── Input DTO (lightweight, no validation constraints) ────────────
