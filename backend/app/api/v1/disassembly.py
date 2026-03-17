@@ -378,14 +378,25 @@ async def latest_analysis(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Get the latest analysis task for a material."""
+    """Get the latest analysis task for a material.
+
+    Prefers completed > running > pending > failed > cancelled.
+    """
+    from sqlalchemy import case
+    status_priority = case(
+        (DisassemblyTask.status == "completed", 0),
+        (DisassemblyTask.status == "running", 1),
+        (DisassemblyTask.status == "pending", 2),
+        (DisassemblyTask.status == "failed", 3),
+        else_=4,
+    )
     task = (await db.execute(
         select(DisassemblyTask)
         .where(
             DisassemblyTask.material_id == material_id,
             DisassemblyTask.user_id == user.id,
         )
-        .order_by(DisassemblyTask.created_at.desc())
+        .order_by(status_priority, DisassemblyTask.created_at.desc())
         .limit(1)
     )).scalar_one_or_none()
 

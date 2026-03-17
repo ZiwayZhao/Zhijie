@@ -195,8 +195,15 @@ async def _extract_page_via_vision(
         )
 
 
-async def _extract_via_vision(pdf_path: Path) -> list[PageMarkdown]:
-    """Extract all pages from an image-based PDF using Claude Vision."""
+async def _extract_via_vision(
+    pdf_path: Path,
+    task_id: str | None = None,
+) -> list[PageMarkdown]:
+    """Extract all pages from an image-based PDF using Claude Vision.
+
+    If task_id is provided, also uploads page PNGs to S3 for embedding in
+    Specialist output (key: pages/{task_id}/page_{N}.png).
+    """
     import fitz
 
     doc = fitz.open(str(pdf_path))
@@ -209,6 +216,11 @@ async def _extract_via_vision(pdf_path: Path) -> list[PageMarkdown]:
         pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
         img_bytes = pix.tobytes("png")
         img_b64 = base64.b64encode(img_bytes).decode("ascii")
+
+        # Upload page image to S3 for later embedding in lecture notes
+        if task_id:
+            _upload_page_image(task_id, i + 1, img_bytes)
+
         tasks.append(
             _extract_page_via_vision(i + 1, img_b64, semaphore)
         )
@@ -228,6 +240,22 @@ async def _extract_via_vision(pdf_path: Path) -> list[PageMarkdown]:
     pages.sort(key=lambda p: p.page_num)
     doc.close()
     return pages
+
+
+def _upload_page_image(task_id: str, page_num: int, img_bytes: bytes) -> str:
+    """Upload a rendered page PNG to S3. Returns S3 key."""
+    s3_key = f"pages/{task_id}/page_{page_num}.png"
+    try:
+        client = get_s3_client()
+        client.put_object(
+            Bucket=settings.s3_bucket_name,
+            Key=s3_key,
+            Body=img_bytes,
+            ContentType="image/png",
+        )
+    except Exception as e:
+        logger.warning("Failed to upload page image %s: %s", s3_key, e)
+    return s3_key
 
 
 def _classify_pdf(pages: list[PageMarkdown]) -> str:
@@ -308,7 +336,7 @@ async def parse_pdf_async(s3_key: str, task_id: str) -> ParsedPDF:
                 "PDF is image-based (avg %.0f chars/page), switching to Vision extraction...",
                 sum(p.char_count for p in pages) / max(len(pages), 1),
             )
-            pages = await _extract_via_vision(tmp_path)
+            pages = await _extract_via_vision(tmp_path, task_id=task_id)
 
     parsed = ParsedPDF(
         pages=pages,

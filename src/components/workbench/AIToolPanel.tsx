@@ -8,7 +8,7 @@
  */
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { startDisassembly, subscribeProgress, getSpecialistResult, getAnalysisResult } from '@/lib/api'
+import { startDisassembly, subscribeProgress, getSpecialistResult, getAnalysisResult, getLatestAnalysis } from '@/lib/api'
 import type { DisassemblyModule, MCQuestion, ProgressEvent } from '@/lib/api'
 import LearningPlanPreview from '@/components/intent/LearningPlanPreview'
 import type { LearningPlanStep } from '@/components/intent/LearningPlanPreview'
@@ -96,6 +96,25 @@ export default function AIToolPanel({ materialId, onModuleSelect, onQuizReady }:
     return () => { unsubRef.current?.() }
   }, [])
 
+  // Auto-detect existing completed analysis
+  useEffect(() => {
+    let cancelled = false
+    getLatestAnalysis(materialId).then(async (task) => {
+      if (cancelled || !task || task.status !== 'completed') return
+      try {
+        const result = await getAnalysisResult(task.task_id)
+        if (cancelled) return
+        taskIdRef.current = task.task_id
+        setModules(result.modules as DisassemblyModule[])
+        setPhase('complete')
+        if (result.quiz?.questions.length && onQuizReady) {
+          onQuizReady(result.quiz.questions)
+        }
+      } catch { /* ignore — user can start fresh */ }
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [materialId, onQuizReady])
+
   const startProcessing = useCallback(async (i: Intent, _data: GatheringData) => {
     setPhase('processing')
     setProgress(0)
@@ -112,12 +131,19 @@ export default function AIToolPanel({ materialId, onModuleSelect, onQuizReady }:
         if (evt.currentStep) setCurrentStep(evt.currentStep)
         if (evt.phase) setPipelinePhase(evt.phase as PipelinePhase)
         if (evt.detail) setProgressDetail(evt.detail)
-        if (evt.status === 'completed' && evt.modules) {
-          setModules(evt.modules)
-          const profile = loadProfile()
-          const steps = generatePlanSteps(evt.modules, i, profile)
-          setPlanSteps(steps)
-          setPhase('plan-preview')
+        if (evt.status === 'completed') {
+          // Fetch full result (modules + quiz) from API
+          getAnalysisResult(taskId).then((result) => {
+            const mods = result.modules as DisassemblyModule[]
+            setModules(mods)
+            const profile = loadProfile()
+            const steps = generatePlanSteps(mods, i, profile)
+            setPlanSteps(steps)
+            setPhase('plan-preview')
+          }).catch(() => {
+            setErrorMsg('获取分析结果失败')
+            setPhase('error')
+          })
         }
         if (evt.status === 'failed') {
           setErrorMsg(evt.currentStep ?? '分析过程中出现错误')

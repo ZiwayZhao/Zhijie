@@ -1,6 +1,6 @@
-import { useMemo, useState, lazy, Suspense } from 'react'
+import { useState, lazy, Suspense } from 'react'
 import { motion } from 'framer-motion'
-import { FileText, Calendar, User, BookOpen, Loader2 } from 'lucide-react'
+import { FileText, Calendar, BookOpen, Loader2 } from 'lucide-react'
 
 const PdfAnnotator = lazy(() => import('./PdfAnnotator'))
 import ErrorBoundary from '@/components/ErrorBoundary'
@@ -8,15 +8,13 @@ import ReactMarkdown from 'react-markdown'
 import remarkMath from 'remark-math'
 import remarkGfm from 'remark-gfm'
 import rehypeKatex from 'rehype-katex'
-import type { Material } from '@/mocks/materials'
-import { materialContent } from '@/mocks/materials'
-import type { MCQuestion } from '@/lib/api'
+import type { MaterialItem, MCQuestion } from '@/lib/api'
 import QuizPanel from '@/components/workbench/QuizPanel'
 
 /* ---------- Types ---------- */
 
 interface MaterialReaderProps {
-  material: Material
+  material: MaterialItem
   courseName?: string
   courseSchool?: string
   specialistMarkdown?: string | null
@@ -67,26 +65,8 @@ export default function MaterialReader({
   const courseInfo = (courseName || courseSchool)
     ? { name: courseName || '', school: courseSchool || '' }
     : null
-  const isPdf = material.fileType === 'application/pdf'
-
-  const pdfUrl = useMemo(() => {
-    if (!isPdf || !material.fileData) return null
-    try {
-      const binary = atob(material.fileData)
-      const bytes = new Uint8Array(binary.length)
-      for (let i = 0; i < binary.length; i++) {
-        bytes[i] = binary.charCodeAt(i)
-      }
-      const blob = new Blob([bytes], { type: 'application/pdf' })
-      return URL.createObjectURL(blob)
-    } catch {
-      return null
-    }
-  }, [isPdf, material.fileData])
-
-  const originalContent = material.fileData && !isPdf
-    ? material.fileData
-    : materialContent
+  const isPdf = material.contentType === 'application/pdf'
+  const pdfUrl = isPdf && material.downloadUrl ? material.downloadUrl : null
 
   const hasQuiz = !!quizQuestions && quizQuestions.length > 0
   const tabs: TabDef[] = [
@@ -110,7 +90,7 @@ export default function MaterialReader({
 
       {/* Tab content */}
       {activeTab === 'original' && (
-        <OriginalContent isPdf={isPdf} pdfUrl={pdfUrl} material={material} content={originalContent} />
+        <OriginalContent isPdf={isPdf} pdfUrl={pdfUrl} materialId={material.id} />
       )}
       {activeTab === 'specialist' && specialistMarkdown && (
         <div className="prose-academic">
@@ -135,22 +115,28 @@ export default function MaterialReader({
 
 /* ---------- Sub-components ---------- */
 
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
 function MaterialHeader({
   material,
   courseInfo,
 }: {
-  material: Material
+  material: MaterialItem
   courseInfo: { name: string; school: string } | null
 }) {
   return (
     <header className="border-b border-border-warm pb-8">
       {/* Type badge */}
       <span className="inline-block px-2.5 py-0.5 text-[11px] border border-red-primary text-red-primary mb-3">
-        {material.type}
+        {material.materialType || 'PDF'}
       </span>
 
       <h1 className="font-heading text-3xl text-text-main leading-snug">
-        {material.name}
+        {material.title || material.filename}
       </h1>
 
       {/* Thin red accent */}
@@ -158,16 +144,12 @@ function MaterialHeader({
 
       <div className="flex flex-wrap items-center gap-4 text-sm text-text-muted">
         <span className="flex items-center gap-1.5">
-          <User size={13} strokeWidth={1.5} className="text-red-primary" />
-          {material.uploader}
-        </span>
-        <span className="flex items-center gap-1.5">
           <Calendar size={13} strokeWidth={1.5} />
-          {material.uploadTime}
+          {new Date(material.createdAt).toLocaleDateString()}
         </span>
         <span className="flex items-center gap-1.5">
           <FileText size={13} strokeWidth={1.5} />
-          {material.fileSize}
+          {formatFileSize(material.fileSize)}
         </span>
         {courseInfo && (
           <span className="flex items-center gap-1.5 italic">
@@ -215,13 +197,11 @@ function TabBar({
 function OriginalContent({
   isPdf,
   pdfUrl,
-  material,
-  content,
+  materialId,
 }: {
   isPdf: boolean
   pdfUrl: string | null
-  material: Material
-  content: string
+  materialId: string
 }) {
   if (isPdf && pdfUrl) {
     return (
@@ -234,21 +214,15 @@ function OriginalContent({
             </div>
           }
         >
-          <PdfAnnotator pdfUrl={pdfUrl} materialId={material.id} />
+          <PdfAnnotator pdfUrl={pdfUrl} materialId={materialId} />
         </Suspense>
       </ErrorBoundary>
     )
   }
 
   return (
-    <div className="prose-academic">
-      <ReactMarkdown
-        remarkPlugins={[remarkMath, remarkGfm]}
-        rehypePlugins={[rehypeKatex]}
-        components={mdComponents}
-      >
-        {fixMarkdown(content)}
-      </ReactMarkdown>
+    <div className="flex items-center justify-center h-64 text-text-muted">
+      <p className="text-sm">此文件类型暂不支持在线预览</p>
     </div>
   )
 }

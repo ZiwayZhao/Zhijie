@@ -2,10 +2,8 @@ import { useState, useEffect, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { ArrowLeft, MessageCircle, BookOpen, Loader2 } from 'lucide-react'
-import { getMaterialById, getMaterialsByCourse } from '@/mocks/materials'
-import { fetchCourse, type CourseItem } from '@/lib/api'
+import { fetchCourse, fetchMaterial, type CourseItem, type MaterialItem } from '@/lib/api'
 import MaterialReader from '@/components/workbench/MaterialReader'
-import RelatedMaterials from '@/components/workbench/RelatedMaterials'
 import AIToolPanel from '@/components/workbench/AIToolPanel'
 import SocraticChat from '@/components/workbench/SocraticChat'
 import ErrorBoundary from '@/components/ErrorBoundary'
@@ -14,11 +12,10 @@ import type { MCQuestion } from '@/lib/api'
 
 export default function WorkbenchPage() {
   const { id: courseId, mid } = useParams()
-  const material = mid ? getMaterialById(mid) : undefined
-  const courseMaterials = courseId ? getMaterialsByCourse(courseId) : []
 
+  const [material, setMaterial] = useState<MaterialItem | null>(null)
   const [course, setCourse] = useState<CourseItem | null>(null)
-  const [courseLoading, setCourseLoading] = useState(true)
+  const [loading, setLoading] = useState(true)
   const [specialistMarkdown, setSpecialistMarkdown] = useState<string | null>(null)
   const [quizQuestions, setQuizQuestions] = useState<MCQuestion[]>([])
   const [activeTab, setActiveTab] = useState('original')
@@ -26,15 +23,19 @@ export default function WorkbenchPage() {
   const [currentModuleId, setCurrentModuleId] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!courseId) {
-      setCourseLoading(false)
-      return
+    const promises: Promise<void>[] = []
+    if (courseId) {
+      promises.push(
+        fetchCourse(courseId).then((c) => setCourse(c)).catch(() => {})
+      )
     }
-    fetchCourse(courseId)
-      .then((c) => setCourse(c))
-      .catch(() => {})
-      .finally(() => setCourseLoading(false))
-  }, [courseId])
+    if (mid) {
+      promises.push(
+        fetchMaterial(mid).then((m) => setMaterial(m)).catch(() => {})
+      )
+    }
+    Promise.all(promises).finally(() => setLoading(false))
+  }, [courseId, mid])
 
   const handleModuleSelect = useCallback((moduleId: string, markdown: string) => {
     setSpecialistMarkdown(markdown)
@@ -46,7 +47,7 @@ export default function WorkbenchPage() {
     setQuizQuestions(questions)
   }, [])
 
-  if (courseLoading) {
+  if (loading) {
     return (
       <div className="flex items-center justify-center h-64 gap-2 text-text-muted">
         <Loader2 size={20} className="animate-spin" />
@@ -55,7 +56,7 @@ export default function WorkbenchPage() {
     )
   }
 
-  if (!material || !course) {
+  if (!material) {
     return (
       <div className="p-8 lg:p-10">
         <h1 className="font-heading text-2xl text-text-main">材料未找到</h1>
@@ -88,21 +89,25 @@ export default function WorkbenchPage() {
             首页
           </Link>
           <span className="text-border-warm">/</span>
-          <Link
-            to={`/course/${course.slug}`}
-            className="hover:text-text-body transition-colors no-underline text-text-muted"
-          >
-            {course.name}
-          </Link>
-          <span className="text-border-warm">/</span>
-          <span className="text-text-body">{material.name}</span>
+          {course && (
+            <>
+              <Link
+                to={`/course/${course.slug}`}
+                className="hover:text-text-body transition-colors no-underline text-text-muted"
+              >
+                {course.name}
+              </Link>
+              <span className="text-border-warm">/</span>
+            </>
+          )}
+          <span className="text-text-body">{material.title || material.filename}</span>
         </nav>
 
         <ErrorBoundary>
           <MaterialReader
             material={material}
-            courseName={course.name}
-            courseSchool={course.school}
+            courseName={course?.name}
+            courseSchool={course?.school}
             specialistMarkdown={specialistMarkdown}
             quizQuestions={quizQuestions}
             activeTab={activeTab}
@@ -149,11 +154,6 @@ export default function WorkbenchPage() {
           </motion.div>
         )}
 
-        <RelatedMaterials
-          materials={courseMaterials}
-          currentId={material.id}
-          courseId={course.slug}
-        />
       </motion.div>
 
       {/* 30% Right — AI tool panel (sticky sidebar with journal gutter feel) */}

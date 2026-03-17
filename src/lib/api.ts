@@ -204,6 +204,28 @@ export interface MaterialItem {
   downloadUrl: string | null
 }
 
+export async function fetchMaterial(materialId: string): Promise<MaterialItem> {
+  const res = await authFetch(`${AUTH_API}/materials/${materialId}`)
+  if (!res.ok) throw new Error(`Material fetch failed: ${res.status}`)
+  const m = await res.json()
+  return {
+    id: m.id,
+    userId: m.user_id,
+    courseId: m.course_id,
+    filename: m.filename,
+    contentType: m.content_type,
+    fileSize: m.file_size,
+    title: m.title,
+    description: m.description,
+    materialType: m.material_type,
+    semester: m.semester,
+    analysisStatus: m.analysis_status,
+    downloadCount: m.download_count,
+    createdAt: m.created_at,
+    downloadUrl: m.download_url,
+  }
+}
+
 /** Max upload size: 50 MB */
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 
