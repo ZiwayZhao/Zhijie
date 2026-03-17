@@ -9,3 +9,4 @@ from app.models.disassembly import (  # noqa: F401
     QuizData,
 )
 from app.models.course import CourseCategory, Course, CourseMaterialSource  # noqa: F401
+from app.models.gaoling_life import GaolingLifePost  # noqa: F401

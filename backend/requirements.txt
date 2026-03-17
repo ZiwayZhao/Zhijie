@@ -32,6 +32,11 @@ pymupdf4llm==0.0.17
 # Rate limiting
 slowapi==0.1.9
 
+# Web scraping (Gaoling Life crawler)
+beautifulsoup4==4.12.3
+charset-normalizer==3.4.1
+requests==2.32.3
+
 # Utilities
 python-multipart==0.0.20
 python-dotenv==1.1.0
