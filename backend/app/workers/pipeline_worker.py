@@ -26,7 +26,7 @@ from app.models.disassembly import (
     SpecialistOutput,
 )
 from app.services.llm_client import LLMError, get_llm_client
-from app.services.pdf_parser import PDFParseError, load_parsed_pages, parse_pdf
+from app.services.pdf_parser import PDFParseError, load_parsed_pages, parse_pdf_async
 from app.services.pipeline.cartographer import CartographerResult, run_cartographer
 from app.services.pipeline.examiner import ExaminerModuleInput, run_examiner
 from app.services.pipeline.specialist import (
@@ -135,7 +135,7 @@ async def _run_pipeline_async(task_id_str: str):
                 logger.info("Phase 1 skip: already parsed (%s)", task.parsed_s3_key)
                 parsed = load_parsed_pages(task.parsed_s3_key)
             else:
-                parsed = parse_pdf(material.s3_key, task_id_str)
+                parsed = await parse_pdf_async(material.s3_key, task_id_str)
                 parsed_key = f"parsed/{task_id_str}/pages.json"
                 await _update_task(
                     session, task_id,
@@ -397,18 +397,33 @@ async def _run_pipeline_async(task_id_str: str):
     time_limit=660,
 )
 def run_pipeline(self: Task, task_id: str):
-    """Celery entry point — runs the async pipeline in an event loop."""
+    """Celery entry point — runs the async pipeline in a fresh event loop.
+
+    We dispose the SQLAlchemy engine pool before each run to avoid
+    "Future attached to a different loop" errors when asyncio.run()
+    creates a new event loop.
+    """
+    from app.db.session import engine
     try:
-        asyncio.run(_run_pipeline_async(task_id))
-    except Exception as e:
-        logger.exception("Pipeline task failed: %s", e)
-        # Update DB on unrecoverable error
-        asyncio.run(_mark_failed(task_id, str(e)))
-        raise
+        # Dispose stale connections from any previous event loop
+        asyncio.get_event_loop_policy().get_event_loop()
+    except RuntimeError:
+        pass
+    finally:
+        asyncio.run(_dispose_and_run(task_id))
+
+
+async def _dispose_and_run(task_id: str):
+    """Dispose engine pool (to clear old-loop connections), then run pipeline."""
+    from app.db.session import engine
+    await engine.dispose()
+    await _run_pipeline_async(task_id)
 
 
 async def _mark_failed(task_id_str: str, error: str):
     """Mark task as failed in DB (called from sync Celery error handler)."""
+    from app.db.session import engine
+    await engine.dispose()
     task_id = uuid.UUID(task_id_str)
     async with async_session_factory() as session:
         await _update_task(

@@ -119,6 +119,7 @@ Source content:
                 response_schema=SpecialistResult,
                 prompt_version=PROMPT_VERSION,
                 run_id=f"{run_id}_mod{module_index}",
+                max_tokens=8192,
             ),
             timeout=SINGLE_MODULE_TIMEOUT,
         )

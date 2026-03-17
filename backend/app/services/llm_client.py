@@ -32,6 +32,28 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=BaseModel)
 
+
+def _resolve_refs(schema: dict) -> dict:
+    """Inline $defs/$ref so the schema is self-contained (OpenRouter compat)."""
+    defs = schema.pop("$defs", {})
+    if not defs:
+        return schema
+
+    def _resolve(node):
+        if isinstance(node, dict):
+            if "$ref" in node:
+                ref_path = node["$ref"]  # e.g. "#/$defs/SelfTestQuestion"
+                ref_name = ref_path.rsplit("/", 1)[-1]
+                if ref_name in defs:
+                    return _resolve(defs[ref_name].copy())
+                return node
+            return {k: _resolve(v) for k, v in node.items()}
+        if isinstance(node, list):
+            return [_resolve(item) for item in node]
+        return node
+
+    return _resolve(schema)
+
 # Singleton
 _client: AsyncOpenAI | None = None
 
@@ -109,14 +131,20 @@ class LLMClient:
 
         # Build function definition from Pydantic schema
         schema_name = response_schema.__name__
+        raw_schema = response_schema.model_json_schema()
+        resolved = _resolve_refs(raw_schema)
+        # Remove unsupported keys for OpenRouter
+        resolved.pop("title", None)
+        resolved.pop("description", None)
         func_def = {
             "type": "function",
             "function": {
                 "name": schema_name,
                 "description": f"Output structured {schema_name}",
-                "parameters": response_schema.model_json_schema(),
+                "parameters": resolved,
             },
         }
+        logger.debug("Tool schema for %s: %s", schema_name, json.dumps(resolved, ensure_ascii=False)[:500])
 
         # Build messages with system prompt
         full_messages = [{"role": "system", "content": system}] + messages
@@ -136,9 +164,21 @@ class LLMClient:
 
                 # Extract function call from response
                 choice = response.choices[0]
+                logger.info(
+                    "LLM response: finish_reason=%s, tool_calls=%d, content=%s",
+                    choice.finish_reason,
+                    len(choice.message.tool_calls or []),
+                    (choice.message.content or "")[:200],
+                )
                 tool_call = None
                 if choice.message.tool_calls:
                     for tc in choice.message.tool_calls:
+                        logger.info(
+                            "Tool call: name=%s, args_len=%d, args_preview=%s",
+                            tc.function.name,
+                            len(tc.function.arguments),
+                            tc.function.arguments[:300],
+                        )
                         if tc.function.name == schema_name:
                             tool_call = tc
                             break
@@ -150,6 +190,7 @@ class LLMClient:
 
                 # Parse JSON arguments
                 raw_args = json.loads(tool_call.function.arguments)
+                logger.info("Parsed args keys: %s", list(raw_args.keys()))
 
                 # Pydantic validation (second layer)
                 parsed = response_schema.model_validate(raw_args)

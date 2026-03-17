@@ -1,9 +1,12 @@
-"""PDF → Markdown parser using pymupdf4llm.
+"""PDF → Markdown parser using pymupdf4llm + Vision LLM fallback.
 
-Downloads PDF from S3, extracts per-page Markdown, uploads result to S3.
+Downloads PDF from S3, extracts per-page Markdown.
+For scanned/image-based PDFs, uses Claude Vision via OpenRouter to OCR.
 All temporary files are cleaned up via contextmanager.
 """
 
+import asyncio
+import base64
 import json
 import logging
 import tempfile
@@ -17,6 +20,9 @@ from app.core.config import settings
 from app.services.s3_client import get_s3_client
 
 logger = logging.getLogger(__name__)
+
+# Vision extraction threshold: if avg chars per page < this, use Vision
+VISION_THRESHOLD_CHARS_PER_PAGE = 50
 
 # Limits
 MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB
@@ -123,6 +129,120 @@ def _extract_pages(pdf_path: Path) -> list[PageMarkdown]:
     return result
 
 
+VISION_SYSTEM_PROMPT = """You are transcribing a university lecture page for a study platform.
+Extract ALL content from this page image as structured Markdown:
+
+1. **Text**: Reproduce ALL text verbatim, preserving structure (headings, bullets, numbered lists)
+2. **Equations**: Write mathematical equations in LaTeX notation ($inline$ or $$block$$)
+3. **Diagrams/Figures**: Describe each diagram precisely — what it depicts, all labels, axes, values, relationships
+4. **Tables**: Reproduce as markdown tables
+5. **Handwriting**: Transcribe handwritten content as faithfully as possible, noting [unclear: ...] for hard-to-read parts
+
+Be EXHAUSTIVE — do not skip ANY visible content. Output only the extracted markdown, no preamble."""
+
+VISION_MODEL = "anthropic/claude-sonnet-4.5"
+MAX_VISION_CONCURRENT = 3
+
+
+async def _extract_page_via_vision(
+    page_num: int,
+    img_b64: str,
+    semaphore: asyncio.Semaphore,
+) -> PageMarkdown:
+    """Extract content from a single page image using Claude Vision."""
+    from openai import AsyncOpenAI
+
+    client = AsyncOpenAI(
+        api_key=settings.openrouter_api_key,
+        base_url="https://openrouter.ai/api/v1",
+    )
+
+    async with semaphore:
+        logger.info("Vision extracting page %d...", page_num)
+        response = await client.chat.completions.create(
+            model=VISION_MODEL,
+            max_tokens=4096,
+            messages=[
+                {"role": "system", "content": VISION_SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/png;base64,{img_b64}",
+                            },
+                        },
+                        {
+                            "type": "text",
+                            "text": f"Transcribe this lecture page (page {page_num}).",
+                        },
+                    ],
+                },
+            ],
+        )
+
+        md_text = response.choices[0].message.content or ""
+        logger.info(
+            "Vision page %d: %d chars extracted",
+            page_num,
+            len(md_text),
+        )
+        return PageMarkdown(
+            page_num=page_num,
+            markdown=md_text,
+            char_count=len(md_text),
+        )
+
+
+async def _extract_via_vision(pdf_path: Path) -> list[PageMarkdown]:
+    """Extract all pages from an image-based PDF using Claude Vision."""
+    import fitz
+
+    doc = fitz.open(str(pdf_path))
+    semaphore = asyncio.Semaphore(MAX_VISION_CONCURRENT)
+
+    # Render all pages to base64 PNG
+    tasks = []
+    for i in range(len(doc)):
+        page = doc[i]
+        pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+        img_bytes = pix.tobytes("png")
+        img_b64 = base64.b64encode(img_bytes).decode("ascii")
+        tasks.append(
+            _extract_page_via_vision(i + 1, img_b64, semaphore)
+        )
+
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    pages = []
+    for r in results:
+        if isinstance(r, Exception):
+            logger.error("Vision extraction failed for a page: %s", r)
+            # Add empty page instead of failing entire pipeline
+            pages.append(PageMarkdown(page_num=0, markdown="", char_count=0))
+        else:
+            pages.append(r)
+
+    # Sort by page number
+    pages.sort(key=lambda p: p.page_num)
+    doc.close()
+    return pages
+
+
+def _classify_pdf(pages: list[PageMarkdown]) -> str:
+    """Classify PDF as 'text' or 'image-based' based on extraction results."""
+    if not pages:
+        return "image-based"
+    avg_chars = sum(p.char_count for p in pages) / len(pages)
+    logger.info(
+        "PDF classification: avg %.0f chars/page (threshold: %d)",
+        avg_chars,
+        VISION_THRESHOLD_CHARS_PER_PAGE,
+    )
+    return "text" if avg_chars >= VISION_THRESHOLD_CHARS_PER_PAGE else "image-based"
+
+
 def _upload_parsed_to_s3(task_id: str, parsed: ParsedPDF) -> str:
     """Upload parsed pages JSON to S3. Returns the S3 key."""
     s3_key = f"parsed/{task_id}/pages.json"
@@ -157,8 +277,11 @@ def _upload_parsed_to_s3(task_id: str, parsed: ParsedPDF) -> str:
     return s3_key
 
 
-def parse_pdf(s3_key: str, task_id: str) -> ParsedPDF:
-    """Main entry: download PDF → extract pages → upload result → return metadata.
+async def parse_pdf_async(s3_key: str, task_id: str) -> ParsedPDF:
+    """Main entry: download PDF → extract pages (with Vision fallback) → upload.
+
+    For text-based PDFs, uses pymupdf4llm (fast, free).
+    For scanned/image-based PDFs, falls back to Claude Vision (accurate, costs ~$0.20).
 
     Args:
         s3_key: S3 key of the uploaded PDF.
@@ -174,8 +297,18 @@ def parse_pdf(s3_key: str, task_id: str) -> ParsedPDF:
         logger.info("Downloading PDF: %s", s3_key)
         _download_pdf_from_s3(s3_key, tmp_path)
 
-        logger.info("Extracting Markdown from PDF...")
+        # Step 1: Try text extraction
+        logger.info("Extracting Markdown from PDF (text mode)...")
         pages = _extract_pages(tmp_path)
+
+        # Step 2: Check if text extraction yielded meaningful content
+        pdf_type = _classify_pdf(pages)
+        if pdf_type == "image-based":
+            logger.info(
+                "PDF is image-based (avg %.0f chars/page), switching to Vision extraction...",
+                sum(p.char_count for p in pages) / max(len(pages), 1),
+            )
+            pages = await _extract_via_vision(tmp_path)
 
     parsed = ParsedPDF(
         pages=pages,
@@ -184,9 +317,10 @@ def parse_pdf(s3_key: str, task_id: str) -> ParsedPDF:
     )
 
     logger.info(
-        "Parsed %d pages, %d total chars",
+        "Parsed %d pages, %d total chars (method: %s)",
         parsed.total_pages,
         parsed.total_chars,
+        pdf_type,
     )
 
     # Upload to S3
@@ -194,6 +328,15 @@ def parse_pdf(s3_key: str, task_id: str) -> ParsedPDF:
     logger.info("Uploaded parsed result to: %s", s3_result_key)
 
     return parsed
+
+
+def parse_pdf(s3_key: str, task_id: str) -> ParsedPDF:
+    """Sync wrapper for backward compatibility.
+
+    NOTE: If called from an already-running event loop (e.g. async pipeline),
+    use parse_pdf_async() directly instead.
+    """
+    return asyncio.run(parse_pdf_async(s3_key, task_id))
 
 
 def load_parsed_pages(parsed_s3_key: str) -> ParsedPDF:
