@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 PROMPT_VERSION = "spec_v1"
 MODEL = "anthropic/claude-sonnet-4.5"
 MAX_CONCURRENT = 3  # Semaphore limit to avoid rate limiting
-SINGLE_MODULE_TIMEOUT = 120  # seconds
+SINGLE_MODULE_TIMEOUT = 300  # seconds (5 min for large modules)
 
 
 # ── Structured Output Schema ─────────────────────────────────────

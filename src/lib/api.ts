@@ -139,6 +139,24 @@ export async function fetchCategories(): Promise<CategoryItem[]> {
   }))
 }
 
+/* ---------- Showcase (public featured materials with pipeline results) ---------- */
+
+export interface ShowcaseItem {
+  task_id: string
+  material_id: string
+  title: string
+  description: string
+  module_count: number
+  quiz_count: number
+}
+
+export async function fetchShowcase(): Promise<ShowcaseItem[]> {
+  const res = await fetch(`${AUTH_API}/disassembly/showcase`)
+  if (!res.ok) return []
+  const data = await res.json()
+  return data.items || []
+}
+
 /* ---------- Course Resource Sources API ---------- */
 
 export interface CourseResourceItem {

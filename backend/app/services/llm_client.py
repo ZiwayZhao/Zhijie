@@ -30,6 +30,27 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+
+def _fix_double_serialized(data: dict) -> dict:
+    """Fix fields where OpenRouter returns JSON strings instead of objects/arrays.
+
+    Example: {"self_test_questions": "[{\"question\": ...}]"} should be
+             {"self_test_questions": [{"question": ...}]}
+    """
+    fixed = {}
+    for key, value in data.items():
+        if isinstance(value, str) and value.strip().startswith(("[", "{")):
+            try:
+                parsed = json.loads(value)
+                if isinstance(parsed, (list, dict)):
+                    logger.info("Fixed double-serialized field: %s", key)
+                    fixed[key] = parsed
+                    continue
+            except (json.JSONDecodeError, ValueError):
+                pass
+        fixed[key] = value
+    return fixed
+
 T = TypeVar("T", bound=BaseModel)
 
 
@@ -103,7 +124,7 @@ class LLMClient:
         prompt_version: str,
         max_tokens: int = 4096,
         run_id: str | None = None,
-        max_retries: int = 2,
+        max_retries: int = 3,
     ) -> LLMResult:
         """Call LLM with function calling → Pydantic model.
 
@@ -146,16 +167,18 @@ class LLMClient:
         }
         logger.debug("Tool schema for %s: %s", schema_name, json.dumps(resolved, ensure_ascii=False)[:500])
 
-        # Build messages with system prompt
-        full_messages = [{"role": "system", "content": system}] + messages
+        from pydantic import ValidationError
 
         last_error = None
+        retry_messages = list(messages)  # Mutable copy for validation retries
+
         for attempt in range(max_retries + 1):
             try:
                 start = time.monotonic()
+                full_msgs = [{"role": "system", "content": system}] + retry_messages
                 response = await self._client.chat.completions.create(
                     model=model,
-                    messages=full_messages,
+                    messages=full_msgs,
                     tools=[func_def],
                     tool_choice={"type": "function", "function": {"name": schema_name}},
                     max_tokens=max_tokens,
@@ -192,6 +215,10 @@ class LLMClient:
                 raw_args = json.loads(tool_call.function.arguments)
                 logger.info("Parsed args keys: %s", list(raw_args.keys()))
 
+                # Fix double-serialized fields (OpenRouter sometimes returns
+                # nested objects as JSON strings instead of actual objects/arrays)
+                raw_args = _fix_double_serialized(raw_args)
+
                 # Pydantic validation (second layer)
                 parsed = response_schema.model_validate(raw_args)
 
@@ -205,6 +232,27 @@ class LLMClient:
                     run_id=run_id,
                     prompt_version=prompt_version,
                 )
+
+            except (ValidationError, json.JSONDecodeError) as e:
+                # Schema validation failed — retry with error feedback
+                if attempt < max_retries:
+                    logger.warning(
+                        "Schema validation failed (attempt %d/%d): %s. Retrying with error feedback...",
+                        attempt + 1, max_retries + 1, str(e)[:300],
+                    )
+                    error_feedback = (
+                        f"Your previous response had a schema validation error: {str(e)[:500]}. "
+                        f"Please fix the issue and return a valid {schema_name} with ALL required fields. "
+                        f"Make sure every required field is present and has the correct type."
+                    )
+                    retry_messages = retry_messages + [
+                        {"role": "assistant", "content": f"I'll call the {schema_name} function."},
+                        {"role": "user", "content": error_feedback},
+                    ]
+                    last_error = LLMError(f"Validation error: {e}")
+                    await asyncio.sleep(1)
+                    continue
+                raise LLMError(f"Validation failed after retries: {e}") from e
 
             except RateLimitError:
                 wait = 2 ** attempt  # 1s, 2s, 4s

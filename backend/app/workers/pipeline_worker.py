@@ -393,8 +393,8 @@ async def _run_pipeline_async(task_id_str: str):
     bind=True,
     name="pipeline.run",
     max_retries=2,
-    soft_time_limit=600,
-    time_limit=660,
+    soft_time_limit=1800,  # 30 min for large materials
+    time_limit=1860,
 )
 def run_pipeline(self: Task, task_id: str):
     """Celery entry point — runs the async pipeline in a fresh event loop.

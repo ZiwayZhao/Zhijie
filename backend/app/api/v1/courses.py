@@ -28,6 +28,7 @@ async def list_courses(
     search: str | None = Query(None, min_length=1, max_length=100, description="Search in name/description"),
     language: str | None = Query(None),
     difficulty: int | None = Query(None, ge=1, le=5),
+    sort: str | None = Query(None, description="Sort: name, popular, newest"),
 ):
     """List courses with pagination, filtering, and search.
 
@@ -79,9 +80,17 @@ async def list_courses(
     count_stmt = select(func.count()).select_from(stmt.subquery())
     total = (await db.execute(count_stmt)).scalar() or 0
 
+    # Sort
+    if sort == "popular":
+        stmt = stmt.order_by(Course.student_count.desc(), Course.name)
+    elif sort == "newest":
+        stmt = stmt.order_by(Course.created_at.desc())
+    else:
+        stmt = stmt.order_by(Course.name)
+
     # Paginate
     offset = (page - 1) * page_size
-    stmt = stmt.order_by(Course.name).offset(offset).limit(page_size)
+    stmt = stmt.offset(offset).limit(page_size)
     result = await db.execute(stmt)
     courses = result.scalars().all()
 

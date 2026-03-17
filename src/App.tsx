@@ -29,7 +29,8 @@ export default function App() {
 
       {/* Protected routes — ProtectedRoute wraps Layout so redirect
           happens BEFORE rendering app chrome (Sidebar/Header) */}
-      <Route path="/" element={<ProtectedRoute><Layout><HomePage /></Layout></ProtectedRoute>} />
+      {/* Home is public — shows different content for auth vs guest */}
+      <Route path="/" element={<Layout><HomePage /></Layout>} />
       <Route path="/course/:id/material/:mid" element={<ProtectedRoute><Layout><WorkbenchPage /></Layout></ProtectedRoute>} />
       <Route path="/upload" element={<ProtectedRoute><Layout><UploadPage /></Layout></ProtectedRoute>} />
       <Route path="/my/courses" element={<ProtectedRoute><Layout><MyCoursesPage /></Layout></ProtectedRoute>} />

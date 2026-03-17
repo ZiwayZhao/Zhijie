@@ -9,7 +9,7 @@ import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.exc import IntegrityError
 from sse_starlette.sse import EventSourceResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -404,6 +404,67 @@ async def latest_analysis(
         return None
 
     return TaskStatusResponse.model_validate(task)
+
+
+# ── GET /disassembly/showcase — public featured materials ──────────
+
+@router.get("/showcase")
+async def showcase_materials(
+    db: AsyncSession = Depends(get_db),
+):
+    """Public endpoint: list materials with completed pipeline analysis.
+
+    Returns a lightweight list for the homepage — no auth required.
+    """
+    # Find all completed tasks with their materials
+    stmt = (
+        select(
+            DisassemblyTask.id.label("task_id"),
+            DisassemblyTask.completed_at,
+            Material.id.label("material_id"),
+            Material.title,
+            Material.description,
+            Material.content_type,
+        )
+        .join(Material, DisassemblyTask.material_id == Material.id)
+        .where(
+            DisassemblyTask.status == "completed",
+            Material.deleted_at.is_(None),
+        )
+        .order_by(DisassemblyTask.completed_at.desc())
+        .limit(10)
+    )
+    rows = (await db.execute(stmt)).all()
+
+    # Deduplicate by material_id (keep latest completed task)
+    seen_materials = set()
+    items = []
+    for row in rows:
+        mid = str(row.material_id)
+        if mid in seen_materials:
+            continue
+        seen_materials.add(mid)
+
+        module_count = (await db.execute(
+            select(func.count()).select_from(DisassemblyModule)
+            .where(DisassemblyModule.task_id == row.task_id)
+        )).scalar() or 0
+
+        quiz_row = (await db.execute(
+            select(QuizData.total_questions)
+            .where(QuizData.task_id == row.task_id)
+        )).scalar_one_or_none()
+
+        items.append({
+            "task_id": str(row.task_id),
+            "material_id": mid,
+            "title": row.title,
+            "description": row.description or "",
+            "module_count": module_count,
+            "quiz_count": quiz_row or 0,
+        })
+
+    return {"items": items, "total": len(items)}
 
 
 # ── POST /disassembly/{task_id}/cancel ────────────────────────────
