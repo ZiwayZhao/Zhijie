@@ -21,6 +21,8 @@ export default function ExplorePage() {
   const [courses, setCourses] = useState<CourseItem[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [retryKey, setRetryKey] = useState(0)
   const [page, setPage] = useState(1)
   const pageSize = 30
 
@@ -41,6 +43,7 @@ export default function ExplorePage() {
   useEffect(() => {
     let cancelled = false
     setLoading(true)
+    setError('')
     fetchCourses({
       page,
       pageSize,
@@ -54,13 +57,16 @@ export default function ExplorePage() {
         }
       })
       .catch((e) => {
-        if (!cancelled) console.error('Failed to load courses:', e)
+        if (!cancelled) {
+          console.error('Failed to load courses:', e)
+          setError('无法加载课程数据，请检查网络连接后重试。')
+        }
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
       })
     return () => { cancelled = true }
-  }, [page, pageSize, activeCategory, debouncedQuery])
+  }, [page, pageSize, activeCategory, debouncedQuery, retryKey])
 
   // Reset page when filters change
   useEffect(() => { setPage(1) }, [activeCategory, debouncedQuery])
@@ -99,7 +105,18 @@ export default function ExplorePage() {
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-10">
-        {loading ? (
+        {error ? (
+          <div className="py-20 text-center">
+            <p className="font-heading text-lg text-text-main mb-2">加载失败</p>
+            <p className="text-sm text-text-muted mb-4">{error}</p>
+            <button
+              onClick={() => setRetryKey((k) => k + 1)}
+              className="text-sm text-red-primary border border-red-primary px-4 py-2 rounded-sm hover:bg-red-primary/5 transition-colors"
+            >
+              重试
+            </button>
+          </div>
+        ) : loading ? (
           <CourseGridSkeleton />
         ) : (
           <CourseGrid courses={courses} />
