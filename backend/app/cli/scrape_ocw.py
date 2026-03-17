@@ -223,6 +223,7 @@ async def scrape(
     topic: str | None = None,
     limit: int | None = None,
     with_content_files: bool = False,
+    file_types: list[str] | None = None,
     rate_limit: float = 1.0,
     batch_size: int = 50,
 ) -> None:
@@ -261,7 +262,7 @@ async def scrape(
                     if with_content_files:
                         files = await scrape_ocw_content_files(
                             ocw.ocw_id,
-                            file_types=[".pdf"],
+                            file_types=file_types or None,
                             rate_limit=rate_limit,
                         )
                         new_files = await _upsert_content_files(
@@ -295,7 +296,10 @@ def main():
     parser.add_argument("--topic", help="Topic name filter")
     parser.add_argument("--limit", type=int, help="Max courses to fetch")
     parser.add_argument("--with-content-files", action="store_true",
-                        help="Also fetch PDF content file listings")
+                        help="Also fetch content file listings")
+    parser.add_argument("--file-types", nargs="*",
+                        help="Filter content files by extension (e.g., .pdf .html). "
+                             "Omit to fetch ALL types.")
     parser.add_argument("--rate-limit", type=float, default=1.0,
                         help="Seconds between API calls (default: 1.0)")
     parser.add_argument("--batch-size", type=int, default=50,
@@ -307,6 +311,7 @@ def main():
         topic=args.topic,
         limit=args.limit,
         with_content_files=args.with_content_files,
+        file_types=args.file_types,
         rate_limit=args.rate_limit,
         batch_size=args.batch_size,
     ))
