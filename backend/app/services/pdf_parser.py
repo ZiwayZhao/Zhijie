@@ -140,7 +140,7 @@ Extract ALL content from this page image as structured Markdown:
 
 Be EXHAUSTIVE — do not skip ANY visible content. Output only the extracted markdown, no preamble."""
 
-VISION_MODEL = "anthropic/claude-sonnet-4.5"
+VISION_MODEL = "z-ai/glm-4.6-20251208"
 MAX_VISION_CONCURRENT = 3
 
 

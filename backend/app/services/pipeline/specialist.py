@@ -23,9 +23,9 @@ from app.services.s3_client import get_s3_client
 logger = logging.getLogger(__name__)
 
 PROMPT_VERSION = "spec_v1"
-MODEL = "anthropic/claude-sonnet-4.5"
+MODEL = "z-ai/glm-5-turbo-20260315"
 MAX_CONCURRENT = 3  # Semaphore limit to avoid rate limiting
-SINGLE_MODULE_TIMEOUT = 300  # seconds (5 min for large modules)
+SINGLE_MODULE_TIMEOUT = 600  # seconds (10 min — GLM models slower on structured output)
 
 
 # ── Structured Output Schema ─────────────────────────────────────

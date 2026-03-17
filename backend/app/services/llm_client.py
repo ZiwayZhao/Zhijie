@@ -36,10 +36,13 @@ def _fix_double_serialized(data: dict) -> dict:
 
     Example: {"self_test_questions": "[{\"question\": ...}]"} should be
              {"self_test_questions": [{"question": ...}]}
+
+    Also handles malformed JSON with Chinese quotes (""'') by normalizing them first.
     """
     fixed = {}
     for key, value in data.items():
         if isinstance(value, str) and value.strip().startswith(("[", "{")):
+            # Try direct parse first
             try:
                 parsed = json.loads(value)
                 if isinstance(parsed, (list, dict)):
@@ -48,6 +51,31 @@ def _fix_double_serialized(data: dict) -> dict:
                     continue
             except (json.JSONDecodeError, ValueError):
                 pass
+
+            # Try with Chinese quote normalization
+            try:
+                normalized = value.replace("\u201c", '"').replace("\u201d", '"')
+                normalized = normalized.replace("\u2018", "'").replace("\u2019", "'")
+                parsed = json.loads(normalized)
+                if isinstance(parsed, (list, dict)):
+                    logger.info("Fixed double-serialized field (after quote normalization): %s", key)
+                    fixed[key] = parsed
+                    continue
+            except (json.JSONDecodeError, ValueError):
+                pass
+
+            # Last resort: try json-repair-like approach for simple string arrays
+            if value.strip().startswith("["):
+                try:
+                    import ast
+                    parsed = ast.literal_eval(value)
+                    if isinstance(parsed, list):
+                        logger.info("Fixed double-serialized field (via ast.literal_eval): %s", key)
+                        fixed[key] = parsed
+                        continue
+                except (ValueError, SyntaxError):
+                    pass
+
         fixed[key] = value
     return fixed
 
@@ -176,11 +204,17 @@ class LLMClient:
             try:
                 start = time.monotonic()
                 full_msgs = [{"role": "system", "content": system}] + retry_messages
+                # Z.AI (ZhiPu GLM) only supports tool_choice="auto"
+                if model.startswith("z-ai/"):
+                    tc = "auto"
+                else:
+                    tc = {"type": "function", "function": {"name": schema_name}}
+
                 response = await self._client.chat.completions.create(
                     model=model,
                     messages=full_msgs,
                     tools=[func_def],
-                    tool_choice={"type": "function", "function": {"name": schema_name}},
+                    tool_choice=tc,
                     max_tokens=max_tokens,
                 )
                 elapsed_ms = int((time.monotonic() - start) * 1000)
