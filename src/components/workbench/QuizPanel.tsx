@@ -30,13 +30,7 @@ const GREEK: Record<string, string> = {
   'π': '\\pi ', 'ε': '\\varepsilon ', 'λ': '\\lambda ', 'α': '\\alpha ',
   'β': '\\beta ', 'ω': '\\omega ',
 }
-const GREEK_SET = new Set(Object.keys(GREEK))
-const MATH_OPS = new Set(['+', '-', '*', '/', '=', '<', '>', '≥', '≤', '≠', '×', '∝', '√'])
 const OP_LATEX: Record<string, string> = { '≥': '\\geq ', '≤': '\\leq ', '≠': '\\neq ', '×': '\\times ', '∝': '\\propto ', '√': '\\sqrt' }
-
-function isFormulaChar(ch: string): boolean {
-  return /[A-Za-z0-9_().,]/.test(ch) || GREEK_SET.has(ch) || MATH_OPS.has(ch) || ch === '^' || ch === '²' || ch === '³'
-}
 
 /**
  * Convert a raw formula token to LaTeX notation.
