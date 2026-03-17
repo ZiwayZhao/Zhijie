@@ -1,0 +1,13 @@
+{
+  "flavor": "ruc",
+  "appName": "智阶 · 人大版",
+  "subtitle": "高瓴人工智能学院",
+  "features": {
+    "gaolingLife": true,
+    "campusCrawler": true,
+    "rucSSO": false
+  },
+  "api": {
+    "baseUrl": "/api/v1"
+  }
+}

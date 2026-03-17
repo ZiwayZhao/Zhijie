@@ -1,0 +1,13 @@
+{
+  "flavor": "public",
+  "appName": "智阶",
+  "subtitle": "课程知识社区",
+  "features": {
+    "gaolingLife": false,
+    "campusCrawler": false,
+    "rucSSO": false
+  },
+  "api": {
+    "baseUrl": "/api/v1"
+  }
+}

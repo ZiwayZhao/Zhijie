@@ -5,7 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:ruc": "vite --mode ruc",
+    "dev:public": "vite --mode public",
     "build": "tsc -b && vite build",
+    "build:ruc": "tsc -b && vite build --mode ruc",
+    "build:public": "tsc -b && vite build --mode public",
+    "build:all": "npm run build:ruc && npm run build:public",
     "lint": "eslint .",
     "preview": "vite preview"
   },

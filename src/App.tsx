@@ -15,6 +15,8 @@ import ReviewPage from '@/pages/ReviewPage'
 import AgendaPage from '@/pages/AgendaPage'
 import LoginPage from '@/pages/LoginPage'
 import RegisterPage from '@/pages/RegisterPage'
+import GaolingLifePage from '@/pages/GaolingLifePage'
+import config from '@/config'
 
 export default function App() {
   return (
@@ -40,6 +42,11 @@ export default function App() {
       <Route path="/my/flashcards/:deckId/review" element={<ProtectedRoute><Layout><ReviewPage /></Layout></ProtectedRoute>} />
       <Route path="/agenda" element={<ProtectedRoute><Layout><AgendaPage /></Layout></ProtectedRoute>} />
       <Route path="/settings" element={<ProtectedRoute><Layout><SettingsPage /></Layout></ProtectedRoute>} />
+
+      {/* RUC-only: 高瓴生活 — route exists only when feature is enabled */}
+      {config.features.gaolingLife && (
+        <Route path="/gaoling" element={<Layout><GaolingLifePage /></Layout>} />
+      )}
     </Routes>
   )
 }

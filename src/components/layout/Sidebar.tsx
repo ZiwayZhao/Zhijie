@@ -10,7 +10,10 @@ import {
   Brain,
   Settings,
   X,
+  Newspaper,
 } from 'lucide-react'
+import FeatureGate from '@/components/FeatureGate'
+import config from '@/config'
 
 const mainNav = [
   { to: '/', label: '首页', icon: Home },
@@ -74,10 +77,10 @@ export default function Sidebar({ mobile, onClose }: SidebarProps) {
       <div className="px-6 pt-7 pb-5 border-b border-border-warm flex items-center justify-between">
         <div>
           <h1 className="font-heading text-2xl text-red-primary tracking-tight m-0 leading-none">
-            智阶
+            {config.appName}
           </h1>
           <p className="text-[11px] text-text-muted mt-1.5 font-body tracking-widest uppercase">
-            课程知识社区
+            {config.subtitle}
           </p>
         </div>
         {mobile && onClose && (
@@ -97,6 +100,17 @@ export default function Sidebar({ mobile, onClose }: SidebarProps) {
             <NavItem key={item.to} {...item} onClick={mobile ? onClose : undefined} />
           ))}
         </div>
+
+        <FeatureGate feature="gaolingLife">
+          <div className="pt-4">
+            <p className="px-5 mb-2 text-[10px] font-heading text-text-muted tracking-widest uppercase">
+              校园生活
+            </p>
+            <div className="space-y-0.5">
+              <NavItem to="/gaoling" label="高瓴生活" icon={Newspaper} onClick={mobile ? onClose : undefined} />
+            </div>
+          </div>
+        </FeatureGate>
 
         <div className="pt-4">
           <p className="px-5 mb-2 text-[10px] font-heading text-text-muted tracking-widest uppercase">
