@@ -69,3 +69,15 @@ body {
   color: var(--color-text-muted);
   font-style: italic;
 }
+
+/* Quiz panel — inline math rendering without extra spacing */
+.quiz-math p {
+  margin: 0;
+  display: inline;
+}
+.quiz-math > p {
+  display: block;
+}
+.quiz-math .katex {
+  font-size: 1em;
+}

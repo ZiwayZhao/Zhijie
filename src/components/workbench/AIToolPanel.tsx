@@ -25,7 +25,7 @@ type Phase = 'idle' | 'gathering' | 'processing' | 'plan-preview' | 'complete' |
 
 interface AIToolPanelProps {
   materialId: string
-  onModuleSelect?: (moduleId: string, markdown: string) => void
+  onModuleSelect?: (moduleId: string, moduleName: string, markdown: string) => void
   onQuizReady?: (questions: MCQuestion[]) => void
 }
 
@@ -176,7 +176,7 @@ export default function AIToolPanel({ materialId, onModuleSelect, onQuizReady }:
     setLoadingModule(mod.id)
     try {
       const result = await getSpecialistResult(taskIdRef.current, mod.id)
-      onModuleSelect(mod.id, result.markdown)
+      onModuleSelect(mod.id, mod.name, result.markdown)
     } catch { /* silently fail */ }
     setLoadingModule(null)
   }, [onModuleSelect])

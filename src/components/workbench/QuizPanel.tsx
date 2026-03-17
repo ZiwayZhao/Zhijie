@@ -8,6 +8,9 @@
 import { useState, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Check, X, BookOpen, ChevronRight, RotateCcw } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
+import remarkMath from 'remark-math'
+import rehypeKatex from 'rehype-katex'
 import type { MCQuestion } from '@/lib/api'
 
 /* ---------- Types ---------- */
@@ -17,6 +20,93 @@ export type { MCQuestion }
 interface QuizPanelProps {
   questions: MCQuestion[]
   onGenerateFlashcards?: () => void
+}
+
+/* ---------- Plain-text → LaTeX pre-processor ---------- */
+
+const GREEK: Record<string, string> = {
+  'Δ': '\\Delta ', 'ρ': '\\rho ', 'σ': '\\sigma ', 'τ': '\\tau ',
+  'γ': '\\gamma ', 'μ': '\\mu ', 'θ': '\\theta ', 'φ': '\\varphi ',
+  'π': '\\pi ', 'ε': '\\varepsilon ', 'λ': '\\lambda ', 'α': '\\alpha ',
+  'β': '\\beta ', 'ω': '\\omega ',
+}
+const GREEK_SET = new Set(Object.keys(GREEK))
+const MATH_OPS = new Set(['+', '-', '*', '/', '=', '<', '>', '≥', '≤', '≠', '×', '∝', '√'])
+const OP_LATEX: Record<string, string> = { '≥': '\\geq ', '≤': '\\leq ', '≠': '\\neq ', '×': '\\times ', '∝': '\\propto ', '√': '\\sqrt' }
+
+function isFormulaChar(ch: string): boolean {
+  return /[A-Za-z0-9_().,]/.test(ch) || GREEK_SET.has(ch) || MATH_OPS.has(ch) || ch === '^' || ch === '²' || ch === '³'
+}
+
+/**
+ * Convert a raw formula token to LaTeX notation.
+ */
+function toLaTeX(raw: string): string {
+  let s = raw
+  for (const [ch, latex] of Object.entries(GREEK)) {
+    s = s.split(ch).join(latex)
+  }
+  for (const [ch, latex] of Object.entries(OP_LATEX)) {
+    s = s.split(ch).join(latex)
+  }
+  s = s.replace(/_([A-Za-z0-9]+)/g, '_{$1}')
+  s = s.replace(/²/g, '^{2}').replace(/³/g, '^{3}')
+  return s
+}
+
+/**
+ * Find individual formula tokens in text and wrap each in $..$.
+ *
+ * A formula token is one of:
+ *  - A Greek letter optionally followed by subscript: ρ, ρ_m, Δh_m, σ_ze
+ *  - A Latin var with subscript: p_A, z_F, SF_sliding
+ *
+ * For compound expressions like "(ρ_m - ρ)gΔh_m" we match each token
+ * separately but they'll appear close together.
+ *
+ * Parenthesized expressions containing formula tokens are matched as a whole.
+ */
+function texify(text: string): string {
+  if (text.includes('$')) return text
+  if (!/[ρσταγμθφπελαβωΔ]|[A-Za-z]_[A-Za-z0-9]|[²³]/.test(text)) return text
+
+  // Step 1: Match parenthesized expressions containing Greek/subscript
+  let result = text.replace(
+    /\([^)]*(?:[ρσταγμθφπελαβωΔ]|[A-Za-z]_[A-Za-z0-9])[^)]*\)/g,
+    (match) => `$${toLaTeX(match)}$`
+  )
+
+  // Step 2: Match remaining standalone formula tokens (not inside $...$)
+  // Token: optional leading letter(s) + (Greek or subscript trigger) + optional trailing chars
+  result = result.replace(
+    /(?<!\$)(?:[A-Za-z]*[ρσταγμθφπελαβωΔ][A-Za-z0-9]*(?:_[A-Za-z0-9]+)?|[A-Za-z]+_[A-Za-z0-9]+)(?:[²³])?(?!\$)/g,
+    (match) => {
+      // Skip if it's already inside a $ block (rough check)
+      return `$${toLaTeX(match)}$`
+    }
+  )
+
+  // Step 3: Merge adjacent $...$$ ...$ blocks into one: $a$$ b$ → $a\; b$
+  // Replace $$ boundary between two math zones with a thin space
+  result = result.replace(/\$\s*\$/g, '\\;')
+
+  return result
+}
+
+/* ---------- Math-aware text renderer ---------- */
+
+function MathText({ children, className }: { children: string; className?: string }) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkMath]}
+      rehypePlugins={[rehypeKatex]}
+      components={{
+        p: ({ children: c }) => <span className={className}>{c}</span>,
+      }}
+    >
+      {texify(children)}
+    </ReactMarkdown>
+  )
 }
 
 /* ---------- Difficulty Badge ---------- */
@@ -91,11 +181,11 @@ function OptionButton({
         {state === 'correct' ? <Check size={12} strokeWidth={3} /> :
           state === 'incorrect' ? <X size={12} strokeWidth={3} /> : letter}
       </span>
-      <span className={`text-sm font-body leading-relaxed ${
+      <span className={`text-sm font-body leading-relaxed quiz-math ${
         state === 'correct' ? 'text-emerald-800' :
           state === 'incorrect' ? 'text-red-primary' : 'text-text-body'
       }`}>
-        {text}
+        <MathText>{text}</MathText>
       </span>
     </button>
   )
@@ -135,9 +225,11 @@ function QuestionCard({
       </div>
 
       {/* Question text */}
-      <p className="text-sm font-body text-text-main leading-relaxed mb-4">
-        {question.question}
-      </p>
+      <div className="text-sm font-body text-text-main leading-relaxed mb-4 quiz-math">
+        <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+          {texify(question.question)}
+        </ReactMarkdown>
+      </div>
 
       {/* Options */}
       <div className="space-y-2">
@@ -180,7 +272,11 @@ function QuestionCard({
               <p className="font-medium mb-1">
                 {isCorrect ? '回答正确' : '回答错误'}
               </p>
-              <p className="text-text-body">{question.explanation}</p>
+              <div className="text-text-body quiz-math">
+                <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                  {texify(question.explanation)}
+                </ReactMarkdown>
+              </div>
             </div>
 
             {/* Source trace */}

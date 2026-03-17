@@ -64,7 +64,7 @@ Rules:
    - "low": background, introduction, appendix
 5. depends_on uses 0-indexed module positions (e.g., module 2 depends on module 0)
 6. Keep module count between 3-15 for a typical course material
-7. Module names should be concise and descriptive (in the language of the material)
+7. **ALWAYS write module names and descriptions in Chinese (中文)**. Even if the source material is in English, use Chinese names with English terms in parentheses where helpful, e.g. "有效应力与土力学 (Effective Stress in Soil Mechanics)"
 
 Think step by step:
 1. First identify the major sections/topics from the page outlines

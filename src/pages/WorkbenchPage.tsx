@@ -21,6 +21,7 @@ export default function WorkbenchPage() {
   const [activeTab, setActiveTab] = useState('original')
   const [showSocratic, setShowSocratic] = useState(false)
   const [currentModuleId, setCurrentModuleId] = useState<string | null>(null)
+  const [currentModuleName, setCurrentModuleName] = useState<string | null>(null)
 
   useEffect(() => {
     const promises: Promise<void>[] = []
@@ -37,10 +38,11 @@ export default function WorkbenchPage() {
     Promise.all(promises).finally(() => setLoading(false))
   }, [courseId, mid])
 
-  const handleModuleSelect = useCallback((moduleId: string, markdown: string) => {
+  const handleModuleSelect = useCallback((moduleId: string, moduleName: string, markdown: string) => {
     setSpecialistMarkdown(markdown)
     setActiveTab('specialist')
     setCurrentModuleId(moduleId)
+    setCurrentModuleName(moduleName)
   }, [])
 
   const handleQuizReady = useCallback((questions: MCQuestion[]) => {
@@ -126,7 +128,7 @@ export default function WorkbenchPage() {
             {showSocratic ? (
               <SocraticChat
                 moduleId={currentModuleId}
-                moduleName={currentModuleId}
+                moduleName={currentModuleName || currentModuleId}
                 mastery={loadProfile().modules[currentModuleId]?.mastery ?? 0.3}
                 onClose={() => setShowSocratic(false)}
               />

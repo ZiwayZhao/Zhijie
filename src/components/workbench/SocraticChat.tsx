@@ -184,12 +184,41 @@ function pickRandom<T>(arr: T[], scaffoldKey: ScaffoldLevel): T {
   return arr[idx]
 }
 
+/* ------------------------------------------------------------------ */
+/*  Greeting / off-topic detection                                     */
+/* ------------------------------------------------------------------ */
+
+const greetingPatterns = /^(你好|hi|hello|hey|嗨|哈喽|早|晚上好|下午好|早上好|在吗|请问|老师|帮我|我想|可以吗|谢谢|感谢|好的)[\s！!？?。.~]*$/i
+
+function isGreeting(msg: string): boolean {
+  return greetingPatterns.test(msg.trim())
+}
+
+function generateGreetingResponse(moduleName: string, scaffold: ScaffoldLevel): string {
+  if (scaffold === 'full') {
+    return `你好！很高兴你来了 :)\n\n我们今天要一起探索"${moduleName}"的内容。为了帮你更好地学习，我想先了解一下：\n\n**你在这个模块中哪里感到最困惑？** 或者，你可以告诉我你想从哪个概念开始。`
+  }
+  if (scaffold === 'moderate') {
+    return `你好！准备好了吗？\n\n关于"${moduleName}"，你有什么想深入讨论的问题吗？也可以告诉我一个你觉得"好像懂了但说不太清楚"的概念，我们从那里开始。`
+  }
+  return `你好！你对"${moduleName}"已经相当熟悉了。\n\n有什么想挑战一下的吗？你可以提出一个你觉得最难的问题，或者告诉我一个你想从新角度思考的概念。`
+}
+
 function generateSocraticResponse(
   userMessage: string,
   moduleName: string,
   scaffold: ScaffoldLevel,
 ): ChatMessage {
   const id = `msg-${Date.now()}`
+
+  // Handle greetings and very short messages specifically
+  if (isGreeting(userMessage) || userMessage.trim().length <= 3) {
+    return {
+      id,
+      role: 'assistant',
+      content: generateGreetingResponse(moduleName, scaffold),
+    }
+  }
 
   const templatePool =
     scaffold === 'full' ? fullTemplates :
