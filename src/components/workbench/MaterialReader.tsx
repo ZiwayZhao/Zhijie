@@ -9,7 +9,9 @@ import remarkMath from 'remark-math'
 import remarkGfm from 'remark-gfm'
 import rehypeKatex from 'rehype-katex'
 import type { MaterialItem, MCQuestion } from '@/lib/api'
+import type { QuestionItem } from '@/lib/types/question'
 import QuizPanel from '@/components/workbench/QuizPanel'
+import QuizPanelV2 from '@/components/quiz/QuizPanelV2'
 
 /* ---------- Types ---------- */
 
@@ -44,6 +46,13 @@ function fixMarkdown(md: string): string {
   fixed = fixed.replace(/(^|\n)(#{1,6})\s+(?:#+\s+)+/g, '$1$2 ')
   fixed = fixed.replace(/^(#{1,6})(?=[^# \n])/gm, '$1 ')
   return fixed
+}
+
+/* ---------- V2 question detection ---------- */
+
+/** Check if questions use the v2 multi-type format (have question_type field) */
+function hasV2Questions(questions: MCQuestion[]): boolean {
+  return questions.length > 0 && 'question_type' in questions[0]
 }
 
 /* ---------- Main Component ---------- */
@@ -104,10 +113,17 @@ export default function MaterialReader({
         </div>
       )}
       {activeTab === 'quiz' && hasQuiz && (
-        <QuizPanel
-          questions={quizQuestions!}
-          onGenerateFlashcards={onGenerateFlashcards}
-        />
+        hasV2Questions(quizQuestions!) ? (
+          <QuizPanelV2
+            questions={quizQuestions! as QuestionItem[]}
+            onGenerateFlashcards={onGenerateFlashcards}
+          />
+        ) : (
+          <QuizPanel
+            questions={quizQuestions!}
+            onGenerateFlashcards={onGenerateFlashcards}
+          />
+        )
       )}
     </motion.article>
   )

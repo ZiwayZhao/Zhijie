@@ -2,6 +2,7 @@
  * AIToolPanel — orchestrator component for the AI learning tools.
  * Manages the phase state machine and delegates rendering to sub-components:
  *   - IntentGatherer (idle + gathering phases)
+ *   - ExamInfoCard + ExamUploadCard (exam-setup phase)
  *   - ProcessingView (processing phase)
  *   - ModuleDisplay (complete + error phases + manual tools)
  *   - LearningPlanPreview (plan-preview phase)
@@ -18,13 +19,19 @@ import type { Intent, GatheringData } from '@/components/workbench/IntentGathere
 import ProcessingView from '@/components/workbench/ProcessingView'
 import type { PipelinePhase } from '@/components/workbench/ProcessingView'
 import { CompletePhase, ErrorPhase, ManualToolSection } from '@/components/workbench/ModuleDisplay'
+import ExamInfoCard from '@/components/workbench/ExamInfoCard'
+import ExamUploadCard from '@/components/workbench/ExamUploadCard'
+import type { ExamProfile } from '@/lib/exam-profile'
+import { loadExamProfile } from '@/lib/exam-profile'
 
 /* ---------- Types ---------- */
 
-type Phase = 'idle' | 'gathering' | 'processing' | 'plan-preview' | 'complete' | 'error'
+type Phase = 'idle' | 'gathering' | 'exam-setup' | 'processing' | 'plan-preview' | 'complete' | 'error'
 
 interface AIToolPanelProps {
   materialId: string
+  courseId?: string
+  courseName?: string
   onModuleSelect?: (moduleId: string, moduleName: string, markdown: string) => void
   onQuizReady?: (questions: MCQuestion[]) => void
 }
@@ -74,10 +81,11 @@ function generatePlanSteps(
 
 /* ---------- Main Component ---------- */
 
-export default function AIToolPanel({ materialId, onModuleSelect, onQuizReady }: AIToolPanelProps) {
+export default function AIToolPanel({ materialId, courseId, courseName, onModuleSelect, onQuizReady }: AIToolPanelProps) {
   const [phase, setPhase] = useState<Phase>('idle')
   const [intent, setIntent] = useState<Intent | null>(null)
   const [gathering, setGathering] = useState<GatheringData>({})
+  const [examProfile, setExamProfile] = useState<ExamProfile | null>(null)
   const [progress, setProgress] = useState(0)
   const [currentStep, setCurrentStep] = useState('')
   const [pipelinePhase, setPipelinePhase] = useState<PipelinePhase>('init')
@@ -91,31 +99,44 @@ export default function AIToolPanel({ materialId, onModuleSelect, onQuizReady }:
 
   const taskIdRef = useRef<string | null>(null)
   const unsubRef = useRef<(() => void) | null>(null)
+  const skipAutoDetectRef = useRef(false)
+  const onQuizReadyRef = useRef(onQuizReady)
+  onQuizReadyRef.current = onQuizReady
+
+  // Load saved exam profile on mount
+  useEffect(() => {
+    if (courseId) {
+      const saved = loadExamProfile(courseId)
+      if (saved) setExamProfile(saved)
+    }
+  }, [courseId])
 
   useEffect(() => {
     return () => { unsubRef.current?.() }
   }, [])
 
-  // Auto-detect existing completed analysis
+  // Auto-detect existing completed analysis (skip if user explicitly reset)
   useEffect(() => {
     let cancelled = false
+    if (skipAutoDetectRef.current) return
     getLatestAnalysis(materialId).then(async (task) => {
-      if (cancelled || !task || task.status !== 'completed') return
+      if (cancelled || skipAutoDetectRef.current || !task || task.status !== 'completed') return
       try {
         const result = await getAnalysisResult(task.task_id)
-        if (cancelled) return
+        if (cancelled || skipAutoDetectRef.current) return
         taskIdRef.current = task.task_id
         setModules(result.modules as DisassemblyModule[])
         setPhase('complete')
-        if (result.quiz?.questions.length && onQuizReady) {
-          onQuizReady(result.quiz.questions)
+        if (result.quiz?.questions.length) {
+          onQuizReadyRef.current?.(result.quiz.questions)
         }
       } catch { /* ignore — user can start fresh */ }
     }).catch(() => {})
     return () => { cancelled = true }
-  }, [materialId, onQuizReady])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [materialId])
 
-  const startProcessing = useCallback(async (i: Intent, _data: GatheringData) => {
+  const startProcessing = useCallback(async (i: Intent, data: GatheringData) => {
     setPhase('processing')
     setProgress(0)
     setCurrentStep('正在启动分析...')
@@ -123,7 +144,11 @@ export default function AIToolPanel({ materialId, onModuleSelect, onQuizReady }:
 
     try {
       const mapped = i === 'review' ? 'learn' : i
-      const { taskId } = await startDisassembly(materialId, mapped)
+      const profile = data.examProfile ?? examProfile ?? undefined
+      const { taskId } = await startDisassembly(materialId, mapped, {
+        examProfile: profile,
+        referenceMaterialIds: data.referenceMaterialIds,
+      })
       taskIdRef.current = taskId
 
       unsubRef.current = subscribeProgress(taskId, (evt: ProgressEvent) => {
@@ -154,17 +179,25 @@ export default function AIToolPanel({ materialId, onModuleSelect, onQuizReady }:
       setErrorMsg(err instanceof Error ? err.message : '启动失败')
       setPhase('error')
     }
-  }, [materialId])
+  }, [materialId, examProfile])
 
   const handleIntentSelect = useCallback((i: Intent) => {
     setIntent(i)
     if (i === 'review') {
       startProcessing(i, {})
+    } else if (i === 'exam') {
+      // If we already have a saved exam profile, skip exam-setup
+      if (examProfile && courseId) {
+        setGathering({ examProfile })
+        setPhase('exam-setup')
+      } else {
+        setPhase('exam-setup')
+      }
     } else {
       setPhase('gathering')
       setGathering({})
     }
-  }, [startProcessing])
+  }, [startProcessing, examProfile, courseId])
 
   const handleGatheringSubmit = useCallback(() => {
     if (!intent) return
@@ -181,10 +214,28 @@ export default function AIToolPanel({ materialId, onModuleSelect, onQuizReady }:
     setLoadingModule(null)
   }, [onModuleSelect])
 
+  const handleExamConfirm = useCallback((profile: ExamProfile) => {
+    setExamProfile(profile)
+    const data: GatheringData = { examProfile: profile }
+    setGathering(data)
+    startProcessing('exam', data)
+  }, [startProcessing])
+
+  const handleExamSkip = useCallback(() => {
+    // No exam profile → v1 fallback
+    startProcessing('exam', {})
+  }, [startProcessing])
+
+  const handleExamUploadProfile = useCallback((profile: ExamProfile) => {
+    // Update from uploaded past exam analysis
+    setExamProfile(profile)
+  }, [])
+
   const handleReset = useCallback(() => {
     unsubRef.current?.()
     unsubRef.current = null
     taskIdRef.current = null
+    skipAutoDetectRef.current = true
     setPhase('idle')
     setIntent(null)
     setGathering({})
@@ -219,6 +270,34 @@ export default function AIToolPanel({ materialId, onModuleSelect, onQuizReady }:
             onSubmit={handleGatheringSubmit}
             onBack={handleReset}
           />
+        )}
+        {phase === 'exam-setup' && (
+          <motion.div
+            key="exam-setup"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.25 }}
+            className="space-y-4"
+          >
+            <button
+              onClick={handleReset}
+              className="text-xs text-text-muted hover:text-text-body transition-colors"
+            >
+              &larr; 返回选择
+            </button>
+            <ExamInfoCard
+              courseId={courseId || materialId}
+              courseName={courseName}
+              onConfirm={handleExamConfirm}
+              onSkip={handleExamSkip}
+            />
+            <ExamUploadCard
+              courseId={courseId || materialId}
+              materialId={materialId}
+              onProfileDetected={handleExamUploadProfile}
+            />
+          </motion.div>
         )}
         {phase === 'processing' && (
           <ProcessingView

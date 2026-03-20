@@ -20,6 +20,10 @@ export const STORAGE_KEYS = {
   /** Exam configurations */
   EXAM_CONFIGS: 'zhijie_exam_configs',
 
+  /** Exam profile per course (exam-profile) */
+  EXAM_PROFILE: (courseId: string) => `zhijie_exam_profile_${courseId}` as const,
+  EXAM_PROFILE_PREFIX: 'zhijie_exam_profile_',
+
   /** Enrolled course slugs */
   ENROLLED_COURSES: 'zhijie_enrolled_courses',
 

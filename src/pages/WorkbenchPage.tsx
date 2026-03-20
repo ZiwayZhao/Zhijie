@@ -1,13 +1,16 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { ArrowLeft, MessageCircle, BookOpen, Loader2 } from 'lucide-react'
+import { ArrowLeft, MessageCircle, BookOpen, Loader2, Wrench } from 'lucide-react'
 import { fetchCourse, fetchMaterial, type CourseItem, type MaterialItem } from '@/lib/api'
 import MaterialReader from '@/components/workbench/MaterialReader'
 import AIToolPanel from '@/components/workbench/AIToolPanel'
 import SocraticChat from '@/components/workbench/SocraticChat'
+import TutorSidebar from '@/components/tutor/TutorSidebar'
 import ErrorBoundary from '@/components/ErrorBoundary'
 import { loadProfile } from '@/lib/student-model'
+import { loadExamProfile } from '@/lib/exam-profile'
+import type { ExamProfile } from '@/lib/exam-profile'
 import type { MCQuestion } from '@/lib/api'
 
 export default function WorkbenchPage() {
@@ -22,6 +25,8 @@ export default function WorkbenchPage() {
   const [showSocratic, setShowSocratic] = useState(false)
   const [currentModuleId, setCurrentModuleId] = useState<string | null>(null)
   const [currentModuleName, setCurrentModuleName] = useState<string | null>(null)
+  const [sidebarTab, setSidebarTab] = useState<'tools' | 'tutor'>('tutor')
+  const [examProfile, setExamProfile] = useState<ExamProfile | null>(null)
 
   useEffect(() => {
     const promises: Promise<void>[] = []
@@ -37,6 +42,14 @@ export default function WorkbenchPage() {
     }
     Promise.all(promises).finally(() => setLoading(false))
   }, [courseId, mid])
+
+  // Load saved exam profile
+  useEffect(() => {
+    if (courseId) {
+      const saved = loadExamProfile(courseId)
+      if (saved) setExamProfile(saved)
+    }
+  }, [courseId])
 
   const handleModuleSelect = useCallback((moduleId: string, moduleName: string, markdown: string) => {
     setSpecialistMarkdown(markdown)
@@ -158,22 +171,73 @@ export default function WorkbenchPage() {
 
       </motion.div>
 
-      {/* 30% Right — AI tool panel (sticky sidebar with journal gutter feel) */}
+      {/* 30% Right — Sidebar with tab switch: Tools | Tutor */}
       <motion.aside
         initial={{ opacity: 0, x: 16 }}
         animate={{ opacity: 1, x: 0 }}
         transition={{ delay: 0.15, duration: 0.35 }}
-        className="flex-[3] lg:min-w-[400px] border-l border-border-warm bg-bg-card p-5 lg:p-6
-                   lg:sticky lg:top-0 lg:h-screen lg:overflow-y-auto
-                   max-lg:border-t max-lg:border-l-0"
+        className="flex-[3] lg:min-w-[400px] border-l border-border-warm bg-bg-card
+                   lg:sticky lg:top-0 lg:h-screen
+                   max-lg:border-t max-lg:border-l-0
+                   flex flex-col"
       >
-        <ErrorBoundary>
-          <AIToolPanel
-            materialId={material.id}
-            onModuleSelect={handleModuleSelect}
-            onQuizReady={handleQuizReady}
-          />
-        </ErrorBoundary>
+        {/* Sidebar tab bar */}
+        <div className="flex border-b border-border-warm px-5 pt-4 lg:px-6 lg:pt-5 shrink-0">
+          <button
+            onClick={() => setSidebarTab('tools')}
+            className={`flex items-center gap-1.5 px-3 pb-2.5 text-sm transition-colors border-b-2 ${
+              sidebarTab === 'tools'
+                ? 'border-red-primary text-red-primary'
+                : 'border-transparent text-text-muted hover:text-text-body'
+            }`}
+          >
+            <Wrench size={14} strokeWidth={1.5} />
+            分析工具
+          </button>
+          <button
+            onClick={() => setSidebarTab('tutor')}
+            className={`flex items-center gap-1.5 px-3 pb-2.5 text-sm transition-colors border-b-2 ${
+              sidebarTab === 'tutor'
+                ? 'border-red-primary text-red-primary'
+                : 'border-transparent text-text-muted hover:text-text-body'
+            }`}
+          >
+            <MessageCircle size={14} strokeWidth={1.5} />
+            AI 助教
+          </button>
+        </div>
+
+        {/* Tab content — visibility-based toggle preserves state + Framer Motion animations */}
+        <div className="flex-1 min-h-0 relative">
+          <div className={`absolute inset-0 overflow-y-auto p-5 lg:p-6 transition-opacity duration-150 ${sidebarTab === 'tools' ? 'opacity-100 z-10' : 'opacity-0 pointer-events-none z-0'}`}>
+            <ErrorBoundary>
+              <AIToolPanel
+                materialId={material.id}
+                courseId={courseId}
+                courseName={course?.name}
+                onModuleSelect={handleModuleSelect}
+                onQuizReady={handleQuizReady}
+              />
+            </ErrorBoundary>
+          </div>
+          <div className={`absolute inset-0 overflow-y-auto p-5 lg:p-6 h-full transition-opacity duration-150 ${sidebarTab === 'tutor' ? 'opacity-100 z-10' : 'opacity-0 pointer-events-none z-0'}`}>
+            <ErrorBoundary>
+              <TutorSidebar
+                materialId={material.id}
+                moduleId={currentModuleId}
+                onSpecialistView={(markdown, moduleName) => {
+                  setSpecialistMarkdown(markdown)
+                  setCurrentModuleName(moduleName)
+                  setActiveTab('specialist')
+                }}
+                onQuizView={(questions) => {
+                  setQuizQuestions(questions)
+                  setActiveTab('quiz')
+                }}
+              />
+            </ErrorBoundary>
+          </div>
+        </div>
       </motion.aside>
     </div>
   )

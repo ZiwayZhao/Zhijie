@@ -5,6 +5,9 @@
 import { differenceInDays, format, isToday } from 'date-fns'
 import type { FlashcardDeck } from '@/lib/fsrs'
 import { getDueCards } from '@/lib/fsrs'
+import type { ExamProfile } from '@/lib/exam-profile'
+import type { LearningProfile } from '@/lib/student-model'
+import { getWeakModules } from '@/lib/student-model'
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -131,6 +134,79 @@ export function getExamPrepItems(configs: ExamConfig[]): ExamPrepItem[] {
   }
 
   return items
+}
+
+/* ------------------------------------------------------------------ */
+/*  Exam profile-driven weak module study items                        */
+/* ------------------------------------------------------------------ */
+
+/** Generate study items for weak modules, prioritized by exam profile */
+export function getExamWeakModuleItems(
+  learningProfile: LearningProfile,
+  courseId: string,
+  courseName: string,
+  examProfile: ExamProfile | null,
+): StudyItem[] {
+  const weak = getWeakModules(learningProfile, courseId)
+  if (weak.length === 0) return []
+
+  // Get question type weights from exam profile for prioritization
+  const typeWeights = new Map<string, number>()
+  if (examProfile?.question_distribution) {
+    for (const d of examProfile.question_distribution) {
+      typeWeights.set(d.question_type, d.percentage)
+    }
+  }
+
+  // Determine days left for urgency
+  let daysLeft = Infinity
+  if (examProfile?.exam_date) {
+    daysLeft = differenceInDays(new Date(examProfile.exam_date), new Date())
+  }
+
+  // Limit to top 3 weakest modules
+  return weak.slice(0, 3).map((mod, i) => {
+    const priority: 'high' | 'medium' | 'low' =
+      daysLeft <= 3 ? 'high' : daysLeft <= 7 && i === 0 ? 'high' : mod.mastery < 0.3 ? 'high' : 'medium'
+
+    const estimatedMin = daysLeft <= 3 ? 20 : 15
+    return {
+      type: 'study' as const,
+      id: `study-weak-${courseId}-${mod.moduleId}`,
+      courseId,
+      courseName,
+      moduleName: mod.moduleName,
+      estimatedMin,
+      priority,
+      completed: false,
+    }
+  })
+}
+
+/** Create exam countdown item from ExamProfile */
+export function getExamCountdownItem(
+  courseId: string,
+  courseName: string,
+  examProfile: ExamProfile,
+): ExamPrepItem | null {
+  if (!examProfile.exam_date) return null
+  const daysLeft = differenceInDays(new Date(examProfile.exam_date), new Date())
+  if (daysLeft < 0 || daysLeft > 30) return null
+
+  const label = examProfile.is_open_book ? '开卷' : '闭卷'
+  const duration = examProfile.duration_minutes ?? 120
+
+  return {
+    type: 'exam-prep',
+    id: `exam-countdown-${courseId}`,
+    courseId,
+    courseName,
+    examDate: examProfile.exam_date,
+    daysLeft,
+    moduleName: `${duration}分钟 · ${label}`,
+    estimatedMin: daysLeft <= 3 ? 30 : daysLeft <= 7 ? 20 : 15,
+    completed: false,
+  }
 }
 
 /** Sort: exam-prep (daysLeft ASC) > flashcard-review (dueCount DESC) > study > todo */

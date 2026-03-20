@@ -28,6 +28,7 @@ openai==1.82.0
 
 # PDF parsing
 pymupdf4llm==0.0.17
+opendataloader-pdf>=2.0.2
 
 # Rate limiting
 slowapi==0.1.9

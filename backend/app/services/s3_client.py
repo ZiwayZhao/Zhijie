@@ -19,13 +19,23 @@ MIME_TO_EXT: dict[str, str] = {
     "image/jpeg": "jpg",
 }
 
-# Singleton client with thread-safe lazy init
+# Singleton clients with thread-safe lazy init
 _client = None
 _client_lock = threading.Lock()
+_public_client = None
+_public_client_lock = threading.Lock()
+
+_S3_CONFIG = Config(
+    signature_version="s3v4",
+    connect_timeout=5,
+    read_timeout=10,
+    retries={"max_attempts": 3, "mode": "standard"},
+    max_pool_connections=25,
+)
 
 
 def get_s3_client():
-    """Return a singleton S3 client with timeouts and retry config."""
+    """Return a singleton S3 client for internal (server-side) operations."""
     global _client
     if _client is None:
         with _client_lock:
@@ -36,15 +46,36 @@ def get_s3_client():
                     aws_access_key_id=settings.s3_access_key,
                     aws_secret_access_key=settings.s3_secret_key,
                     region_name=settings.s3_region,
-                    config=Config(
-                        signature_version="s3v4",
-                        connect_timeout=5,
-                        read_timeout=10,
-                        retries={"max_attempts": 3, "mode": "standard"},
-                        max_pool_connections=25,
-                    ),
+                    config=_S3_CONFIG,
                 )
     return _client
+
+
+def _get_public_s3_client():
+    """Return a singleton S3 client using public endpoint for presigned URLs.
+
+    In Docker, the internal endpoint (minio:9000) is unreachable from the
+    browser. This client connects via S3_PUBLIC_ENDPOINT_URL (e.g.
+    localhost:9002) so presigned URLs are valid for the host machine.
+
+    Falls back to the internal client if S3_PUBLIC_ENDPOINT_URL is not set.
+    """
+    if not settings.s3_public_endpoint_url:
+        return get_s3_client()
+
+    global _public_client
+    if _public_client is None:
+        with _public_client_lock:
+            if _public_client is None:
+                _public_client = boto3.client(
+                    "s3",
+                    endpoint_url=settings.s3_public_endpoint_url,
+                    aws_access_key_id=settings.s3_access_key,
+                    aws_secret_access_key=settings.s3_secret_key,
+                    region_name=settings.s3_region,
+                    config=_S3_CONFIG,
+                )
+    return _public_client
 
 
 def ensure_bucket_exists() -> None:
@@ -83,10 +114,11 @@ def create_presigned_upload_url(
 ) -> str:
     """Generate a presigned PUT URL for direct client upload.
 
+    Uses the public S3 client so URLs are accessible from the browser.
     ContentLength is included as best-effort metadata binding.
     Actual size enforcement is in confirm_upload via head_object.
     """
-    client = get_s3_client()
+    client = _get_public_s3_client()
     return client.generate_presigned_url(
         "put_object",
         Params={
@@ -103,8 +135,11 @@ def create_presigned_download_url(
     s3_key: str,
     expires_in: int = 3600,
 ) -> str:
-    """Generate a presigned GET URL for downloading."""
-    client = get_s3_client()
+    """Generate a presigned GET URL for downloading.
+
+    Uses the public S3 client so URLs are accessible from the browser.
+    """
+    client = _get_public_s3_client()
     return client.generate_presigned_url(
         "get_object",
         Params={

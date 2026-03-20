@@ -4,6 +4,7 @@
  */
 
 import { authFetch, getAccessToken } from '@/lib/auth-api'
+import type { ExamProfile } from '@/lib/exam-profile'
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8003/api'
 const AUTH_API = `${API_BASE}/v1`
@@ -113,7 +114,11 @@ let mockTaskCounter = 0
 
 export async function startDisassembly(
   materialId: string,
-  _intent: 'learn' | 'exam',
+  intent: 'learn' | 'exam',
+  options?: {
+    examProfile?: ExamProfile
+    referenceMaterialIds?: string[]
+  },
 ): Promise<{ taskId: string }> {
   if (USE_MOCK) {
     mockTaskCounter++
@@ -123,7 +128,12 @@ export async function startDisassembly(
   const res = await authFetch(`${AUTH_API}/disassembly/start`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ material_id: materialId }),
+    body: JSON.stringify({
+      material_id: materialId,
+      intent,
+      exam_profile: options?.examProfile ?? null,
+      reference_material_ids: options?.referenceMaterialIds ?? [],
+    }),
   })
 
   if (!res.ok) {

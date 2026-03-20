@@ -7,6 +7,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
+        extra="ignore",
     )
 
     # App
@@ -34,6 +35,7 @@ class Settings(BaseSettings):
 
     # S3 / MinIO — credentials from .env
     s3_endpoint_url: str = Field(..., alias="S3_ENDPOINT_URL")
+    s3_public_endpoint_url: str = Field(default="", alias="S3_PUBLIC_ENDPOINT_URL")
     s3_access_key: str = Field(..., alias="S3_ACCESS_KEY")
     s3_secret_key: str = Field(..., alias="S3_SECRET_KEY")
     s3_bucket_name: str = "zhijie-materials"
@@ -41,6 +43,10 @@ class Settings(BaseSettings):
 
     # LLM (OpenRouter)
     openrouter_api_key: str = Field(default="", alias="OPENROUTER_API_KEY")
+
+    # OpenDataLoader PDF (enhanced extraction with image bounding boxes)
+    odl_enabled: bool = True
+    odl_image_description_enabled: bool = True
 
     # CORS
     cors_origins: list[str] = Field(default_factory=lambda: [

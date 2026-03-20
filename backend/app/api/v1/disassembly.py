@@ -26,7 +26,6 @@ from app.models.user import User
 from app.schemas.disassembly import (
     DisassemblyErrorCode,
     DisassemblyResultResponse,
-    MCQuestion,
     ModuleDetailResponse,
     ModuleDependencyResponse,
     ModuleSummary,
@@ -122,6 +121,9 @@ async def start_analysis(
         material_id=body.material_id,
         user_id=user.id,
         run_id=run_id,
+        intent=body.intent,
+        exam_profile_json=body.exam_profile,
+        reference_material_ids=[str(mid) for mid in body.reference_material_ids] if body.reference_material_ids else None,
     )
     db.add(task)
     try:
@@ -282,7 +284,7 @@ async def task_result(
             id=quiz_row.id,
             task_id=quiz_row.task_id,
             schema_version=quiz_row.schema_version,
-            questions=[MCQuestion.model_validate(q) for q in quiz_row.questions],
+            questions=list(quiz_row.questions),
             total_questions=quiz_row.total_questions,
             model_used=quiz_row.model_used,
             prompt_version=quiz_row.prompt_version,

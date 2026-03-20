@@ -1,7 +1,11 @@
-"""PDF → Markdown parser using pymupdf4llm + Vision LLM fallback.
+"""PDF → Markdown parser: OpenDataLoader (primary) + pymupdf4llm + Vision LLM fallback.
+
+Extraction priority:
+1. OpenDataLoader (Java-based) — best image/table/formula extraction
+2. pymupdf4llm — fast text extraction for text-heavy PDFs
+3. Claude Vision — fallback for scanned/image-based PDFs
 
 Downloads PDF from S3, extracts per-page Markdown.
-For scanned/image-based PDFs, uses Claude Vision via OpenRouter to OCR.
 All temporary files are cleaned up via contextmanager.
 """
 
@@ -306,10 +310,12 @@ def _upload_parsed_to_s3(task_id: str, parsed: ParsedPDF) -> str:
 
 
 async def parse_pdf_async(s3_key: str, task_id: str) -> ParsedPDF:
-    """Main entry: download PDF → extract pages (with Vision fallback) → upload.
+    """Main entry: download PDF → extract pages → upload.
 
-    For text-based PDFs, uses pymupdf4llm (fast, free).
-    For scanned/image-based PDFs, falls back to Claude Vision (accurate, costs ~$0.20).
+    Extraction priority:
+    1. OpenDataLoader — best quality (images + tables + bounding boxes)
+    2. pymupdf4llm — fast fallback for text-heavy PDFs
+    3. Claude Vision — fallback for scanned/image-based PDFs
 
     Args:
         s3_key: S3 key of the uploaded PDF.
@@ -325,18 +331,63 @@ async def parse_pdf_async(s3_key: str, task_id: str) -> ParsedPDF:
         logger.info("Downloading PDF: %s", s3_key)
         _download_pdf_from_s3(s3_key, tmp_path)
 
-        # Step 1: Try text extraction
-        logger.info("Extracting Markdown from PDF (text mode)...")
-        pages = _extract_pages(tmp_path)
+        extraction_method = "unknown"
 
-        # Step 2: Check if text extraction yielded meaningful content
-        pdf_type = _classify_pdf(pages)
-        if pdf_type == "image-based":
-            logger.info(
-                "PDF is image-based (avg %.0f chars/page), switching to Vision extraction...",
-                sum(p.char_count for p in pages) / max(len(pages), 1),
-            )
-            pages = await _extract_via_vision(tmp_path, task_id=task_id)
+        # Strategy 1: Try OpenDataLoader (best image/table handling)
+        if settings.odl_enabled:
+            try:
+                from app.services.odl_pdf_parser import (
+                    extract_pdf_with_odl,
+                    is_odl_available,
+                )
+                if is_odl_available():
+                    logger.info("Trying OpenDataLoader extraction...")
+                    odl_pages, image_count = await extract_pdf_with_odl(
+                        tmp_path,
+                        task_id,
+                        describe_images=settings.odl_image_description_enabled,
+                    )
+                    if odl_pages:
+                        pages = [
+                            PageMarkdown(
+                                page_num=pn,
+                                markdown=md,
+                                char_count=len(md),
+                            )
+                            for pn, md in odl_pages
+                        ]
+                        extraction_method = f"opendataloader ({image_count} images)"
+                        logger.info(
+                            "ODL extraction succeeded: %d pages, %d images",
+                            len(pages), image_count,
+                        )
+                    else:
+                        logger.warning("ODL returned empty, falling back to pymupdf4llm")
+                        pages = None
+                else:
+                    logger.info("OpenDataLoader not available, using pymupdf4llm")
+                    pages = None
+            except Exception as e:
+                logger.warning("OpenDataLoader failed, falling back: %s", e)
+                pages = None
+        else:
+            pages = None
+
+        # Strategy 2: pymupdf4llm (fast text extraction)
+        if pages is None:
+            logger.info("Extracting Markdown from PDF (pymupdf4llm)...")
+            pages = _extract_pages(tmp_path)
+            extraction_method = "pymupdf4llm"
+
+            # Strategy 3: Vision fallback for image-based PDFs
+            pdf_type = _classify_pdf(pages)
+            if pdf_type == "image-based":
+                logger.info(
+                    "PDF is image-based (avg %.0f chars/page), switching to Vision...",
+                    sum(p.char_count for p in pages) / max(len(pages), 1),
+                )
+                pages = await _extract_via_vision(tmp_path, task_id=task_id)
+                extraction_method = "vision"
 
     parsed = ParsedPDF(
         pages=pages,
@@ -348,7 +399,7 @@ async def parse_pdf_async(s3_key: str, task_id: str) -> ParsedPDF:
         "Parsed %d pages, %d total chars (method: %s)",
         parsed.total_pages,
         parsed.total_chars,
-        pdf_type,
+        extraction_method,
     )
 
     # Upload to S3

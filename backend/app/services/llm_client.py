@@ -186,6 +186,10 @@ class LLMClient:
                 elapsed_ms = int((time.monotonic() - start) * 1000)
 
                 # Extract function call from response
+                if not response.choices:
+                    raise LLMError(
+                        "LLM returned empty choices (model may be overloaded)"
+                    )
                 choice = response.choices[0]
                 logger.info(
                     "LLM response: finish_reason=%s, tool_calls=%d, content=%s",

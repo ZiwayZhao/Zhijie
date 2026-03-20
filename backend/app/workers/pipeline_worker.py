@@ -28,7 +28,7 @@ from app.models.disassembly import (
 from app.services.llm_client import LLMError, get_llm_client
 from app.services.pdf_parser import PDFParseError, load_parsed_pages, parse_pdf_async
 from app.services.pipeline.cartographer import CartographerResult, run_cartographer
-from app.services.pipeline.examiner import ExaminerModuleInput, run_examiner
+from app.services.pipeline.examiner import ExaminerModuleInput, run_examiner_v2
 from app.services.pipeline.specialist import (
     SpecialistResult,
     run_specialist,
@@ -320,11 +320,21 @@ async def _run_pipeline_async(task_id_str: str):
                         exam_traps=list(spec_out.exam_traps or []),
                     )))
 
-                exam_result = await run_examiner(
+                # Parse exam profile from task if available
+                exam_profile = None
+                if task.exam_profile_json:
+                    from app.schemas.exam_profile import ExamProfile
+                    try:
+                        exam_profile = ExamProfile(**task.exam_profile_json)
+                    except Exception as e:
+                        logger.warning("Failed to parse exam_profile, falling back to v1: %s", e)
+
+                exam_result = await run_examiner_v2(
                     plan=plan,
                     specialist_results=spec_data,
                     llm=llm,
                     run_id=run_id,
+                    exam_profile=exam_profile,
                 )
 
                 exam_data = exam_result.data
@@ -332,6 +342,7 @@ async def _run_pipeline_async(task_id_str: str):
                     task_id=task_id,
                     questions=[q.model_dump() for q in exam_data.questions],
                     total_questions=len(exam_data.questions),
+                    schema_version=2 if exam_profile else 1,
                     source_module_ids=[m.id for m in db_modules],
                     prompt_version=exam_result.prompt_version,
                     model_used=exam_result.model,

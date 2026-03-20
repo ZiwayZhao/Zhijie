@@ -4,6 +4,7 @@
  */
 import { motion } from 'framer-motion'
 import { BookOpen, Target, RefreshCw, ArrowRight } from 'lucide-react'
+import type { ExamProfile } from '@/lib/exam-profile'
 
 /* ---------- Types ---------- */
 
@@ -13,6 +14,8 @@ export interface GatheringData {
   examDate?: string
   masteryLevel?: number
   familiarity?: 'zero' | 'basic' | 'advanced'
+  examProfile?: ExamProfile
+  referenceMaterialIds?: string[]
 }
 
 interface IdlePhaseProps {

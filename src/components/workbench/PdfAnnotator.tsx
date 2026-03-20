@@ -1,6 +1,5 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import {
-  PdfLoader,
   PdfHighlighter,
   TextHighlight,
   AreaHighlight,
@@ -13,6 +12,7 @@ import 'react-pdf-highlighter-extended/dist/esm/style/PdfHighlighter.css'
 import 'react-pdf-highlighter-extended/dist/esm/style/TextHighlight.css'
 import 'react-pdf-highlighter-extended/dist/esm/style/AreaHighlight.css'
 import 'react-pdf-highlighter-extended/dist/esm/style/MouseSelection.css'
+import { GlobalWorkerOptions, getDocument, type PDFDocumentProxy } from 'pdfjs-dist'
 import { Highlighter, MessageSquare, Trash2, X, Loader2 } from 'lucide-react'
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
@@ -52,10 +52,56 @@ function saveHighlights(id: string, list: CommentedHighlight[]) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  StrictMode-safe PDF loader hook                                    */
+/*  Fixes race condition in react-pdf-highlighter-extended's PdfLoader */
+/*  where zombie .finally() from destroyed task clears loading state   */
+/* ------------------------------------------------------------------ */
+
+function usePdfDocument(url: string) {
+  const [doc, setDoc] = useState<PDFDocumentProxy | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    setDoc(null)
+
+    GlobalWorkerOptions.workerSrc = pdfjsWorker
+    const task = getDocument(url)
+
+    task.promise
+      .then((pdfDoc) => {
+        if (!cancelled) {
+          setDoc(pdfDoc)
+          setLoading(false)
+        } else {
+          pdfDoc.destroy()
+        }
+      })
+      .catch((err) => {
+        if (!cancelled && err?.message !== 'Worker was destroyed') {
+          setError(err?.message ?? 'PDF 加载失败')
+          setLoading(false)
+        }
+      })
+
+    return () => {
+      cancelled = true
+      task.destroy()
+    }
+  }, [url])
+
+  return { doc, error, loading }
+}
+
+/* ------------------------------------------------------------------ */
 /*  Main component                                                     */
 /* ------------------------------------------------------------------ */
 
 export default function PdfAnnotator({ pdfUrl, materialId }: PdfAnnotatorProps) {
+  const { doc: pdfDocument, error: pdfError, loading: pdfLoading } = usePdfDocument(pdfUrl)
   const [highlights, setHighlights] = useState<CommentedHighlight[]>(() =>
     loadHighlights(materialId),
   )
@@ -124,36 +170,31 @@ export default function PdfAnnotator({ pdfUrl, materialId }: PdfAnnotatorProps) 
           </button>
         </div>
 
-        {/* PDF.js viewer */}
-        <PdfLoader
-          document={pdfUrl}
-          workerSrc={pdfjsWorker}
-          beforeLoad={() => (
-            <div className="flex items-center justify-center h-full gap-2 text-text-muted">
-              <Loader2 size={20} className="animate-spin" />
-              <span className="text-sm">加载 PDF...</span>
-            </div>
-          )}
-          errorMessage={(err) => (
-            <div className="flex items-center justify-center h-full text-sm text-red-primary">
-              PDF 加载失败: {err.message}
-            </div>
-          )}
-        >
-          {(pdfDocument) => (
-            <PdfHighlighter
-              pdfDocument={pdfDocument}
-              highlights={highlights}
-              enableAreaSelection={(e) => e.altKey}
-              textSelectionColor="rgba(165, 25, 46, 0.15)"
-              onSelection={(selection) => addHighlight(selection)}
-              utilsRef={(u) => { utilsRef.current = u }}
-              style={{ height: '100%' }}
-            >
-              <HighlightContainer />
-            </PdfHighlighter>
-          )}
-        </PdfLoader>
+        {/* PDF.js viewer — custom loader to fix StrictMode race condition */}
+        {pdfLoading && (
+          <div className="flex items-center justify-center h-full gap-2 text-text-muted">
+            <Loader2 size={20} className="animate-spin" />
+            <span className="text-sm">加载 PDF...</span>
+          </div>
+        )}
+        {pdfError && (
+          <div className="flex items-center justify-center h-full text-sm text-red-primary">
+            PDF 加载失败: {pdfError}
+          </div>
+        )}
+        {pdfDocument && (
+          <PdfHighlighter
+            pdfDocument={pdfDocument}
+            highlights={highlights}
+            enableAreaSelection={(e) => e.altKey}
+            textSelectionColor="rgba(165, 25, 46, 0.15)"
+            onSelection={(selection) => addHighlight(selection)}
+            utilsRef={(u) => { utilsRef.current = u }}
+            style={{ height: '100%' }}
+          >
+            <HighlightContainer />
+          </PdfHighlighter>
+        )}
       </div>
 
       {/* Annotation sidebar */}

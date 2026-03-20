@@ -18,9 +18,9 @@ WORKDIR /code
 # Copy only installed packages (no gcc/dev headers in runtime image)
 COPY --from=builder /install /usr/local
 
-# Runtime-only system lib for asyncpg
+# Runtime system libs: libpq5 for asyncpg, JRE for OpenDataLoader PDF
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends libpq5 && \
+    apt-get install -y --no-install-recommends libpq5 default-jre-headless && \
     rm -rf /var/lib/apt/lists/*
 
 # Non-root user

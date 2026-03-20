@@ -10,6 +10,8 @@ import enum
 import uuid
 from datetime import datetime
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -40,6 +42,9 @@ class DisassemblyError(BaseModel):
 class StartAnalysisRequest(BaseModel):
     """POST /disassembly/start body."""
     material_id: uuid.UUID
+    intent: str | None = None  # 'learn' | 'exam' | 'review'
+    exam_profile: dict | None = None  # ExamProfile as dict (avoid circular import)
+    reference_material_ids: list[uuid.UUID] = Field(default_factory=list)
 
 
 class CancelAnalysisRequest(BaseModel):
@@ -176,13 +181,16 @@ class MCQuestion(BaseModel):
 class QuizResponse(BaseModel):
     """GET /disassembly/{task_id}/result quiz section.
 
-    DB stores questions as JSONB list. Service layer validates
-    via [MCQuestion.model_validate(q) for q in db_row.questions].
+    DB stores questions as JSONB list.
+    schema_version=1: v1 MCQ-only (MCQuestion shape)
+    schema_version=2: v2 multi-type (question_type, blanks, steps, etc.)
+    We pass questions through as raw dicts so v2 fields are preserved.
+    The frontend discriminates via hasV2Questions().
     """
     id: uuid.UUID
     task_id: uuid.UUID
-    schema_version: int
-    questions: list[MCQuestion]
+    schema_version: int = 1
+    questions: list[dict[str, Any]]
     total_questions: int
     model_used: str
     prompt_version: str

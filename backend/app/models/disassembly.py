@@ -91,6 +91,11 @@ class DisassemblyTask(Base):
     # Celery task tracking
     celery_task_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
+    # Intent & exam context (Phase C — exam quiz integration)
+    intent: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    exam_profile_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    reference_material_ids: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+
     # Config snapshot for reproducibility
     config_json: Mapped[dict | None] = mapped_column(JSONB, server_default="{}")
 
