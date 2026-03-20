@@ -55,9 +55,9 @@ const DEFAULT_BKT: BKTParams = {
 /*  Profile management                                                 */
 /* ------------------------------------------------------------------ */
 
-export function createDefaultProfile(): LearningProfile {
+export function createDefaultProfile(userId?: string): LearningProfile {
   return {
-    userId: 'local-user',
+    userId: userId ?? 'local-user',
     goal: null,
     modules: {},
     totalStudyMinutes: 0,
@@ -355,19 +355,35 @@ export function getCourseModules(
 
 import { STORAGE_KEYS } from './storage-keys'
 
-export function loadProfile(): LearningProfile {
+/**
+ * Load profile from localStorage.
+ * If userId is provided and differs from stored profile, creates a new one
+ * (prevents cross-user data leakage on login switch).
+ */
+export function loadProfile(userId?: string): LearningProfile {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.LEARNING_PROFILE)
     if (raw) {
       const parsed = JSON.parse(raw)
       if (parsed && typeof parsed === 'object' && parsed.userId) {
+        // If authenticated userId is provided and differs, create fresh profile
+        if (userId && parsed.userId !== userId && parsed.userId !== 'local-user') {
+          const fresh = createDefaultProfile(userId)
+          saveProfile(fresh)
+          return fresh
+        }
+        // Migrate legacy 'local-user' to real userId if available
+        if (userId && parsed.userId === 'local-user') {
+          parsed.userId = userId
+          saveProfile(parsed)
+        }
         return parsed
       }
     }
   } catch {
     // fall through
   }
-  return createDefaultProfile()
+  return createDefaultProfile(userId)
 }
 
 export function saveProfile(profile: LearningProfile): void {
