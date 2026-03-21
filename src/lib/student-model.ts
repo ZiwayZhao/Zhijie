@@ -388,8 +388,8 @@ export function loadProfile(userId?: string): LearningProfile {
 
 export function saveProfile(profile: LearningProfile): void {
   localStorage.setItem(STORAGE_KEYS.LEARNING_PROFILE, JSON.stringify(profile))
-  // Fire-and-forget backend sync
-  import('@/lib/sync-service').then(({ syncStudentProfileUp }) => {
-    syncStudentProfileUp(profile).catch(() => {})
+  // Debounced fire-and-forget backend sync (2s coalesce)
+  import('@/lib/sync-service').then(({ debouncedSyncProfileUp }) => {
+    debouncedSyncProfileUp(profile)
   })
 }

@@ -1,6 +1,6 @@
 """Flashcard sync request/response schemas."""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class FlashcardNoteSync(BaseModel):
@@ -27,6 +27,15 @@ class FlashcardCardSync(BaseModel):
     stability: float = 0
     difficulty: float = 0
     state: str = "new"  # new | learning | review | relearning
+
+    @field_validator("state", mode="before")
+    @classmethod
+    def normalize_state(cls, v: str | int) -> str:
+        """Accept both numeric (ts-fsrs State enum) and string state values."""
+        _num_to_str = {0: "new", 1: "learning", 2: "review", 3: "relearning"}
+        if isinstance(v, int):
+            return _num_to_str.get(v, "new")
+        return str(v)
     reps: int = 0
     lapses: int = 0
     # Evolution tracking

@@ -297,9 +297,9 @@ export function loadTodos(): TodoItem[] {
 
 export function saveTodos(todos: TodoItem[]): void {
   localStorage.setItem(STORAGE_KEYS.AGENDA_TODOS, JSON.stringify(todos))
-  // Fire-and-forget backend sync
-  import('@/lib/sync-service').then(({ syncTodosUp }) => {
-    syncTodosUp(todos).catch(() => {})
+  // Debounced fire-and-forget backend sync (2s coalesce)
+  import('@/lib/sync-service').then(({ debouncedSyncTodosUp }) => {
+    debouncedSyncTodosUp(todos)
   })
 }
 

@@ -22,6 +22,33 @@ function isAuthenticated(): boolean {
   return !!getAccessToken()
 }
 
+/** Flag to suppress sync-up during boot sync (prevents redundant round-trip) */
+let _suppressSyncUp = false
+
+/**
+ * Debounced sync: coalesces rapid calls into a single backend request.
+ * Returns a debounced version of an async function keyed by a string.
+ */
+const _debounceTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+function debouncedSync<T extends unknown[]>(
+  key: string,
+  fn: (...args: T) => Promise<void>,
+  delayMs = 2000,
+): (...args: T) => void {
+  return (...args: T) => {
+    const existing = _debounceTimers.get(key)
+    if (existing) clearTimeout(existing)
+    _debounceTimers.set(
+      key,
+      setTimeout(() => {
+        _debounceTimers.delete(key)
+        fn(...args).catch(() => {})
+      }, delayMs),
+    )
+  }
+}
+
 /** Safe JSON POST with authFetch — returns null on failure (fire-and-forget) */
 async function syncPost<T>(url: string, body: unknown): Promise<T | null> {
   if (!isAuthenticated()) return null
@@ -101,8 +128,9 @@ interface StudentProfileBackend {
   }>
 }
 
-/** Push student profile to backend */
+/** Push student profile to backend (debounced when called from save) */
 export async function syncStudentProfileUp(profile: LearningProfile): Promise<void> {
+  if (_suppressSyncUp) return
   const modules: Record<string, {
     module_name: string
     course_id: string
@@ -163,6 +191,14 @@ export async function syncStudentProfileDown(): Promise<LearningProfile | null> 
 /* ------------------------------------------------------------------ */
 
 import type { FlashcardDeck, FlashcardNote, FlashcardCard, FlashcardReviewLog } from '@/lib/fsrs'
+
+/** Map ts-fsrs numeric State enum to backend string values */
+const STATE_NUM_TO_STR: Record<number, string> = {
+  0: 'new',
+  1: 'learning',
+  2: 'review',
+  3: 'relearning',
+}
 
 interface FlashcardDeckBackend {
   course_id: string
@@ -226,7 +262,7 @@ export async function syncFlashcardDeckUp(deck: FlashcardDeck): Promise<void> {
     due: c.card.due instanceof Date ? c.card.due.toISOString() : String(c.card.due),
     stability: c.card.stability,
     difficulty: c.card.difficulty,
-    state: c.card.state,
+    state: STATE_NUM_TO_STR[c.card.state] ?? 'new',
     reps: c.card.reps,
     lapses: c.card.lapses,
     consecutive_again: c.consecutiveAgain,
@@ -244,6 +280,8 @@ export async function syncFlashcardDeckUp(deck: FlashcardDeck): Promise<void> {
   }))
 
   await syncPost(`${API_V1}/flashcards/${encodeURIComponent(deck.courseId)}/sync`, {
+    course_id: deck.courseId,
+    course_name: deck.courseName || '',
     notes,
     cards,
     review_logs: reviewLogs,
@@ -268,8 +306,6 @@ interface AnnotationBackend {
   highlight_data: Record<string, unknown>
   color: string | null
   comment: string | null
-  source_text: string | null
-  page_number: number | null
 }
 
 /** Push annotations to backend (full-replace strategy) */
@@ -285,8 +321,6 @@ export async function syncAnnotationsUp(
     highlight_data: h as Record<string, unknown>,
     color: (h.color as string) || null,
     comment: (h.comment as string) || null,
-    source_text: null,
-    page_number: null,
   }))
 
   await syncPost(`${API_V1}/materials/${materialId}/annotations/sync`, {
@@ -312,6 +346,7 @@ import type { TodoItem } from '@/lib/agenda-engine'
 
 /** Push todos to backend (full-replace) */
 export async function syncTodosUp(todos: TodoItem[]): Promise<void> {
+  if (_suppressSyncUp) return
   const items = todos.map((t) => ({
     client_id: t.id,
     title: t.title,
@@ -417,6 +452,8 @@ import { STORAGE_KEYS } from '@/lib/storage-keys'
 export async function bootSync(): Promise<void> {
   if (!isAuthenticated()) return
 
+  // Suppress sync-up during boot to avoid redundant save→push round-trips
+  _suppressSyncUp = true
   try {
     // Pull student profile (backend wins — may have data from other devices)
     const remoteProfile = await syncStudentProfileDown()
@@ -438,6 +475,8 @@ export async function bootSync(): Promise<void> {
     }
   } catch (err) {
     console.warn('[sync] Boot sync failed:', err)
+  } finally {
+    _suppressSyncUp = false
   }
 }
 
@@ -470,3 +509,44 @@ function mergeProfiles(
 
   return merged
 }
+
+/* ------------------------------------------------------------------ */
+/*  Debounced sync wrappers (used by persistence save functions)       */
+/* ------------------------------------------------------------------ */
+
+/** Debounced student profile sync (2s delay) */
+export const debouncedSyncProfileUp = debouncedSync(
+  'student-profile',
+  syncStudentProfileUp,
+  2000,
+)
+
+/** Debounced flashcard deck sync (3s delay — coalesces rapid card reviews) */
+export const debouncedSyncDeckUp = debouncedSync(
+  'flashcard-deck',
+  syncFlashcardDeckUp,
+  3000,
+)
+
+/** Debounced todos sync (2s delay) */
+export const debouncedSyncTodosUp = debouncedSync(
+  'todos',
+  syncTodosUp,
+  2000,
+)
+
+/** Debounced annotations sync (2s delay) */
+export const debouncedSyncAnnotationsUp = debouncedSync(
+  'annotations',
+  (materialId: string, highlights: Array<{ id: string; [key: string]: unknown }>) =>
+    syncAnnotationsUp(materialId, highlights),
+  2000,
+)
+
+/** Debounced tutor messages sync (5s delay — messages come in bursts) */
+export const debouncedSyncTutorUp = debouncedSync(
+  'tutor-messages',
+  (materialId: string, messages: Array<{ id: string; role: string; content: string; timestamp?: number; plan?: unknown; toolResults?: unknown[] }>) =>
+    syncTutorMessagesUp(materialId, messages),
+  5000,
+)
