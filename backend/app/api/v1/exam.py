@@ -1,14 +1,21 @@
-"""Past exam upload + ExamProfile management API."""
+"""Past exam upload + ExamProfile management API.
+
+Persists exam profiles to database (replaces in-memory dict).
+"""
 
 import logging
 import uuid
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.security import get_current_user
+from app.db.session import get_db
 from app.models.user import User
+from app.models.agenda import ExamProfileRecord
 from app.schemas.exam_profile import ExamProfile, QuestionTypeDistribution
 from app.services.s3_client import get_s3_client
 
@@ -50,10 +57,61 @@ class ExamProfileResponse(BaseModel):
     profile: ExamProfile
 
 
-# ── In-memory store (will be replaced by DB in production) ──────
+# ── Helpers ──────────────────────────────────────────────────────
 
-# Maps course_id -> ExamProfile
-_exam_profiles: dict[str, ExamProfile] = {}
+async def _get_or_create_record(
+    user_id: uuid.UUID,
+    course_id: str,
+    db: AsyncSession,
+) -> ExamProfileRecord:
+    """Get or create exam profile record."""
+    result = await db.execute(
+        select(ExamProfileRecord).where(
+            ExamProfileRecord.user_id == user_id,
+            ExamProfileRecord.course_id == course_id,
+        )
+    )
+    record = result.scalar_one_or_none()
+    if not record:
+        record = ExamProfileRecord(user_id=user_id, course_id=course_id)
+        db.add(record)
+        await db.flush()
+    return record
+
+
+def _record_to_profile(record: ExamProfileRecord) -> ExamProfile:
+    """Convert DB record to schema."""
+    dist = [
+        QuestionTypeDistribution(**d)
+        for d in (record.question_distribution or [])
+    ]
+    return ExamProfile(
+        exam_date=record.exam_date,
+        duration_minutes=record.duration_minutes,
+        is_open_book=record.is_open_book,
+        calculator_allowed=record.calculator_allowed,
+        total_points=record.total_points,
+        question_distribution=dist,
+        source=record.source,
+        analyzed_exam_s3_key=record.analyzed_exam_s3_key,
+    )
+
+
+def _update_record_from_profile(
+    record: ExamProfileRecord,
+    profile: ExamProfile,
+) -> None:
+    """Update DB record from schema."""
+    record.exam_date = profile.exam_date
+    record.duration_minutes = profile.duration_minutes
+    record.is_open_book = profile.is_open_book
+    record.calculator_allowed = profile.calculator_allowed
+    record.total_points = profile.total_points
+    record.question_distribution = [
+        d.model_dump() for d in profile.question_distribution
+    ]
+    record.source = profile.source
+    record.analyzed_exam_s3_key = profile.analyzed_exam_s3_key
 
 
 # ── POST /exam/upload-past-exam ─────────────────────────────────
@@ -63,6 +121,7 @@ async def upload_past_exam(
     file: UploadFile = File(...),
     course_id: str = Form(...),
     user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """Upload a past exam PDF/image and analyze its format.
 
@@ -70,7 +129,7 @@ async def upload_past_exam(
     1. Validate file type and size
     2. Upload to S3 under past_exams/{user_id}/{course_id}/
     3. Run ExamAnalyzer to extract question type distribution
-    4. Return detected ExamProfile
+    4. Persist profile to DB
     """
     # Validate content type
     content_type = file.content_type or ""
@@ -124,8 +183,10 @@ async def upload_past_exam(
             analyzed_exam_s3_key=s3_key,
         )
 
-    # Store profile for this course
-    _exam_profiles[course_id] = profile
+    # Persist to DB
+    record = await _get_or_create_record(user.id, course_id, db)
+    _update_record_from_profile(record, profile)
+    await db.commit()
 
     return ExamUploadResponse(s3_key=s3_key, profile=profile)
 
@@ -136,13 +197,23 @@ async def upload_past_exam(
 async def get_exam_profile(
     course_id: str,
     user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """Get saved ExamProfile for a course.
 
     Returns stored profile if exists, otherwise a default based on course type.
     """
-    profile = _exam_profiles.get(course_id)
-    if not profile:
+    result = await db.execute(
+        select(ExamProfileRecord).where(
+            ExamProfileRecord.user_id == user.id,
+            ExamProfileRecord.course_id == course_id,
+        )
+    )
+    record = result.scalar_one_or_none()
+
+    if record:
+        profile = _record_to_profile(record)
+    else:
         # Generate default
         profile = ExamProfile.default_for_course_type("cs")
 
@@ -166,6 +237,7 @@ async def update_exam_profile(
     course_id: str,
     body: UpdateExamProfileRequest,
     user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """Manually update/save an ExamProfile for a course."""
     profile = ExamProfile(
@@ -177,6 +249,9 @@ async def update_exam_profile(
         question_distribution=body.question_distribution,
         source="user_input",
     )
-    _exam_profiles[course_id] = profile
+
+    record = await _get_or_create_record(user.id, course_id, db)
+    _update_record_from_profile(record, profile)
+    await db.commit()
 
     return ExamProfileResponse(course_id=course_id, profile=profile)

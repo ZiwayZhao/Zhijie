@@ -37,6 +37,7 @@ from app.schemas.disassembly import (
     TaskStatusResponse,
 )
 from app.services.s3_client import get_s3_client
+from app.services.sse_ticket import create_ticket, verify_ticket
 from app.workers.pipeline_worker import run_pipeline
 
 logger = logging.getLogger(__name__)
@@ -151,32 +152,63 @@ async def start_analysis(
     )
 
 
+# ── POST /disassembly/tasks/{task_id}/stream-ticket ──────────────
+
+@router.post("/tasks/{task_id}/stream-ticket")
+async def get_stream_ticket(
+    task_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get a short-lived ticket for SSE stream authentication.
+
+    Usage:
+    1. Client calls this with Bearer auth → gets ticket
+    2. Client opens EventSource with ?ticket=<ticket>
+    """
+    task = await _get_task_or_404(task_id, user, db)
+    ticket = await create_ticket(
+        db=db,
+        user_id=user.id,
+        resource_type="pipeline",
+        resource_id=task_id,
+    )
+    await db.commit()
+    return {"ticket": ticket}
+
+
 # ── GET /disassembly/{task_id}/status (SSE) ──────────────────────
 
 @router.get("/tasks/{task_id}/status")
 async def task_status_sse(
     task_id: uuid.UUID,
-    token: str | None = None,
+    ticket: str | None = None,
+    token: str | None = None,  # Legacy fallback — deprecated
     db: AsyncSession = Depends(get_db),
 ):
     """SSE stream for pipeline progress.
 
-    EventSource doesn't support Authorization headers, so we accept
-    the JWT as a query parameter (?token=...) in addition to the header.
-    First sends current DB state, then subscribes to Redis Pub/Sub for real-time updates.
+    Auth: prefer ?ticket= (short-lived, from POST /stream-ticket).
+    Falls back to ?token= (raw JWT, deprecated) for backward compatibility.
     """
-    # Authenticate via query param since EventSource can't send headers
-    if not token:
-        raise HTTPException(status_code=401, detail="Missing token")
-    from app.core.security import decode_access_token
-    payload = decode_access_token(token)
-    user_id = payload.get("sub")
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Invalid token")
-    user_result = await db.execute(select(User).where(User.id == uuid.UUID(user_id)))
-    user = user_result.scalar_one_or_none()
+    user: User | None = None
+
+    # Prefer ticket-based auth
+    if ticket:
+        user_id = await verify_ticket(db, ticket, "pipeline", task_id)
+        user_result = await db.execute(select(User).where(User.id == user_id))
+        user = user_result.scalar_one_or_none()
+    elif token:
+        # Legacy JWT fallback (deprecated)
+        from app.core.security import decode_access_token
+        payload = decode_access_token(token)
+        sub = payload.get("sub")
+        if sub:
+            user_result = await db.execute(select(User).where(User.id == uuid.UUID(sub)))
+            user = user_result.scalar_one_or_none()
+
     if not user or not user.is_active:
-        raise HTTPException(status_code=401, detail="User not found or inactive")
+        raise HTTPException(status_code=401, detail="Authentication required")
 
     task = await _get_task_or_404(task_id, user, db)
 
