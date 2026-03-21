@@ -224,6 +224,10 @@ export function loadDeck(courseId: string): FlashcardDeck | null {
 
 export function saveDeck(deck: FlashcardDeck): void {
   localStorage.setItem(STORAGE_KEYS.FLASHCARDS(deck.courseId), JSON.stringify(deck))
+  // Fire-and-forget backend sync
+  import('@/lib/sync-service').then(({ syncFlashcardDeckUp }) => {
+    syncFlashcardDeckUp(deck).catch(() => {})
+  })
 }
 
 export function loadAllDecks(): FlashcardDeck[] {

@@ -49,6 +49,10 @@ function loadHighlights(id: string): CommentedHighlight[] {
 
 function saveHighlights(id: string, list: CommentedHighlight[]) {
   localStorage.setItem(STORAGE_KEYS.HIGHLIGHTS(id), JSON.stringify(list))
+  // Fire-and-forget backend sync
+  import('@/lib/sync-service').then(({ syncAnnotationsUp }) => {
+    syncAnnotationsUp(id, list as Array<{ id: string; [key: string]: unknown }>).catch(() => {})
+  })
 }
 
 /* ------------------------------------------------------------------ */

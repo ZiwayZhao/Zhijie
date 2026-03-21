@@ -228,6 +228,10 @@ function persistMessages(materialId: string, messages: TutorMessage[]): void {
       storageKey(materialId),
       JSON.stringify({ messages: capped, lastUpdated: Date.now() }),
     )
+    // Fire-and-forget backend sync
+    import('@/lib/sync-service').then(({ syncTutorMessagesUp }) => {
+      syncTutorMessagesUp(materialId, capped).catch(() => {})
+    })
   } catch {
     // localStorage full — silently skip
   }

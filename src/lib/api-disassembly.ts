@@ -151,12 +151,49 @@ export function subscribeProgress(
 ): () => void {
   if (USE_MOCK) return subscribeMockProgress(taskId, onProgress)
 
-  // Real SSE — EventSource doesn't support Authorization header,
-  // so we pass the token as a query parameter (known limitation)
-  const token = getAccessToken()
-  const sseUrl = new URL(`${AUTH_API}/disassembly/tasks/${taskId}/status`, window.location.origin)
-  if (token) sseUrl.searchParams.set('token', token)
-  const evtSource = new EventSource(sseUrl.toString())
+  // Prefer SSE ticket auth; fall back to raw JWT if ticket fetch fails
+  let cancelled = false
+  let evtSource: EventSource | null = null
+
+  const connect = async () => {
+    const sseUrl = new URL(`${AUTH_API}/disassembly/tasks/${taskId}/status`, window.location.origin)
+
+    // Try getting a ticket first (preferred, more secure)
+    try {
+      const { getStreamTicket } = await import('@/lib/sync-service')
+      const ticket = await getStreamTicket(taskId)
+      if (ticket) {
+        sseUrl.searchParams.set('ticket', ticket)
+      } else {
+        // Fallback to raw JWT
+        const token = getAccessToken()
+        if (token) sseUrl.searchParams.set('token', token)
+      }
+    } catch {
+      // Fallback to raw JWT
+      const token = getAccessToken()
+      if (token) sseUrl.searchParams.set('token', token)
+    }
+
+    if (cancelled) return
+    return new EventSource(sseUrl.toString())
+  }
+
+  // Connect async, then wire up handlers
+  connect().then((es) => {
+    if (!es || cancelled) { es?.close(); return }
+    evtSource = es
+    wireEventSource(es, taskId, onProgress)
+  })
+
+  return () => { cancelled = true; evtSource?.close() }
+}
+
+function wireEventSource(
+  evtSource: EventSource,
+  _taskId: string,
+  onProgress: (event: ProgressEvent) => void,
+): void {
 
   evtSource.addEventListener('status', (e) => {
     try {
@@ -187,8 +224,6 @@ export function subscribeProgress(
     onProgress({ progress: 0, status: 'failed', phase: 'unknown', currentStep: '连接中断' })
     evtSource.close()
   }
-
-  return () => evtSource.close()
 }
 
 function subscribeMockProgress(

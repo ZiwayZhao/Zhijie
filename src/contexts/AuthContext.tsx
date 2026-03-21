@@ -19,6 +19,9 @@ import {
   type RegisterPayload,
   type UserResponse,
 } from '@/lib/auth-api'
+// Lazy import to keep sync-service chunk-splittable
+const triggerBootSync = () =>
+  import('@/lib/sync-service').then(({ bootSync }) => bootSync()).catch(() => {})
 
 /* ---------- Types ---------- */
 
@@ -64,7 +67,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     getCurrentUser()
       .then((u) => {
-        if (!cancelled) setUser(u)
+        if (!cancelled) {
+          setUser(u)
+          // Boot sync: pull backend data → merge with localStorage
+          triggerBootSync()
+        }
       })
       .catch(() => {
         if (!cancelled) clearTokens()
@@ -103,6 +110,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await apiLogin(payload)
     const u = await getCurrentUser()
     setUser(u)
+    triggerBootSync()
   }, [])
 
   const register = useCallback(async (payload: RegisterPayload) => {
@@ -110,6 +118,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await apiRegister(payload)
     const u = await getCurrentUser()
     setUser(u)
+    triggerBootSync()
   }, [])
 
   const logout = useCallback(async () => {
