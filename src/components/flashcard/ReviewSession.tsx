@@ -219,7 +219,7 @@ export default function ReviewSession({ deck, dueCards, onComplete }: ReviewSess
         saveProfile(profileRef.current)
       }
 
-      // Detect evolution triggers
+      // Detect evolution triggers (async — fire-and-forget, results collected before completion)
       const updatedCard = deck.cards[cardIdx >= 0 ? cardIdx : 0]
       if (updatedCard) {
         const triggers = detectTriggers(updatedCard, deck)
@@ -230,7 +230,9 @@ export default function ReviewSession({ deck, dueCards, onComplete }: ReviewSess
               (s) => s.trigger.cardId === trigger.cardId && s.trigger.type === trigger.type,
             )
             if (!existing) {
-              evolutionQueue.current.push(generateSuggestion(trigger, triggerNote))
+              generateSuggestion(trigger, triggerNote).then((suggestion) => {
+                evolutionQueue.current.push(suggestion)
+              })
             }
           }
         }

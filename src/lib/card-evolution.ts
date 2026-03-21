@@ -1,9 +1,11 @@
 /**
- * Card Evolution — detects triggers and generates mock LLM actions
+ * Card Evolution — detects triggers and generates LLM-driven actions
  * for flashcard self-improvement (split, retire, rewrite, add hints).
+ * Falls back to local heuristics if backend is unavailable.
  */
 import type { FlashcardCard, FlashcardNote, FlashcardDeck } from '@/lib/fsrs'
 import { createFlashcard } from '@/lib/fsrs'
+import { authFetch, getAccessToken } from '@/lib/auth-api'
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -96,22 +98,52 @@ export function detectTriggers(card: FlashcardCard, deck: FlashcardDeck): Evolut
 }
 
 /* ------------------------------------------------------------------ */
-/*  Mock LLM action generation                                         */
+/*  LLM-driven evolution (with local fallback)                         */
 /* ------------------------------------------------------------------ */
 
-function splitNote(note: FlashcardNote): FlashcardNote[] {
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8003/api'
+
+interface EvolveApiResponse {
+  action: string
+  split_cards?: { front: string; back: string }[]
+  rewritten_front?: string
+  rewritten_back?: string
+  hint?: string
+}
+
+/** Call backend LLM for evolution; returns null on failure */
+async function callEvolveApi(
+  triggerType: string,
+  note: FlashcardNote,
+): Promise<EvolveApiResponse | null> {
+  if (!getAccessToken()) return null
+  try {
+    const res = await authFetch(`${API_BASE}/v1/flashcards/evolve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        trigger_type: triggerType,
+        note_front: note.fields.front,
+        note_back: note.fields.back,
+        note_tags: note.tags,
+      }),
+    })
+    if (!res.ok) return null
+    return await res.json()
+  } catch {
+    return null
+  }
+}
+
+/** Local fallback: split note by sentences */
+function splitNoteLocal(note: FlashcardNote): FlashcardNote[] {
   const backParts = note.fields.back.split(/[。；;.!！]/).filter((s) => s.trim().length > 4)
 
   if (backParts.length < 2) {
-    // Can't split meaningfully, create a simpler version
     return [{
       ...note,
       id: `note-split-${Date.now()}-1`,
-      fields: {
-        front: `${note.fields.front}（简化版）`,
-        back: note.fields.back,
-        extra: '由 AI 自动简化生成',
-      },
+      fields: { front: `${note.fields.front}（简化版）`, back: note.fields.back, extra: '由 AI 自动简化生成' },
       generatedBy: 'ai-evolved',
       createdAt: Date.now(),
     }]
@@ -132,72 +164,83 @@ function splitNote(note: FlashcardNote): FlashcardNote[] {
   }))
 }
 
-function rewriteNote(note: FlashcardNote): { front: string; back: string } {
-  // Simple rephrasing strategy
-  const front = note.type === 'cloze'
-    ? note.fields.front.replace(/\{\{c\d+::(.+?)\}\}/g, '{{c1::____}}')
-    : `请用自己的话解释：${note.fields.front}`
-
-  return { front, back: note.fields.back }
-}
-
-function generateHint(note: FlashcardNote): string {
-  const backWords = note.fields.back.split(/\s+/)
-  if (backWords.length > 5) {
-    return `提示：答案的关键词包含"${backWords[0]}"和"${backWords[Math.floor(backWords.length / 2)]}"`
-  }
-  return `提示：答案与"${note.tags[0] ?? '本知识点'}"相关`
-}
-
-export function generateEvolutionAction(
+/**
+ * Generate evolution action — tries LLM backend first, falls back to local heuristics.
+ */
+export async function generateEvolutionAction(
   trigger: EvolutionTrigger,
   note: FlashcardNote,
-): EvolutionAction {
+): Promise<EvolutionAction> {
+  // Retire is purely local — no LLM needed
+  if (trigger.type === 'consecutive-easy') {
+    return { type: 'retire', cardId: trigger.cardId }
+  }
+
+  // Try LLM backend
+  const apiResult = await callEvolveApi(trigger.type, note)
+
+  if (apiResult) {
+    if (apiResult.action === 'split' && apiResult.split_cards) {
+      const newNotes: FlashcardNote[] = apiResult.split_cards.map((c, i) => ({
+        ...note,
+        id: `note-split-${Date.now()}-${i}`,
+        type: 'basic' as const,
+        fields: { front: c.front, back: c.back, extra: `AI 拆分自：${note.fields.front.slice(0, 30)}` },
+        tags: [...note.tags, 'ai-split'],
+        generatedBy: 'ai-evolved' as const,
+        createdAt: Date.now(),
+      }))
+      return { type: 'split', originalCardId: trigger.cardId, newNotes }
+    }
+    if (apiResult.action === 'rewrite' && apiResult.rewritten_front) {
+      return {
+        type: 'rewrite', cardId: trigger.cardId, noteId: trigger.noteId,
+        newFields: { front: apiResult.rewritten_front, back: apiResult.rewritten_back ?? note.fields.back },
+      }
+    }
+    if (apiResult.action === 'add-hint' && apiResult.hint) {
+      return { type: 'add-hint', cardId: trigger.cardId, noteId: trigger.noteId, hint: apiResult.hint }
+    }
+  }
+
+  // Local fallback
   switch (trigger.type) {
     case 'consecutive-again':
-      return {
-        type: 'split',
-        originalCardId: trigger.cardId,
-        newNotes: splitNote(note),
-      }
-    case 'consecutive-easy':
-      return { type: 'retire', cardId: trigger.cardId }
+      return { type: 'split', originalCardId: trigger.cardId, newNotes: splitNoteLocal(note) }
     case 'high-lapse-rate':
       return {
-        type: 'rewrite',
-        cardId: trigger.cardId,
-        noteId: trigger.noteId,
-        newFields: rewriteNote(note),
+        type: 'rewrite', cardId: trigger.cardId, noteId: trigger.noteId,
+        newFields: { front: `请用自己的话解释：${note.fields.front}`, back: note.fields.back },
       }
     case 'slow-response':
       return {
-        type: 'add-hint',
-        cardId: trigger.cardId,
-        noteId: trigger.noteId,
-        hint: generateHint(note),
+        type: 'add-hint', cardId: trigger.cardId, noteId: trigger.noteId,
+        hint: `提示：与「${note.tags[0] ?? '本知识点'}」相关`,
       }
+    default:
+      return { type: 'retire', cardId: trigger.cardId }
   }
 }
 
-export function generateSuggestion(
+export async function generateSuggestion(
   trigger: EvolutionTrigger,
   note: FlashcardNote,
-): EvolutionSuggestion {
-  const action = generateEvolutionAction(trigger, note)
+): Promise<EvolutionSuggestion> {
+  const action = await generateEvolutionAction(trigger, note)
   let description = ''
 
   switch (trigger.type) {
     case 'consecutive-again':
-      description = `连续忘记 ${trigger.count} 次，建议拆分为更简单的子卡片`
+      description = `连续忘记 ${trigger.count} 次，AI 建议拆分为更简单的子卡片`
       break
     case 'consecutive-easy':
       description = `连续标记为"简单" ${trigger.count} 次，建议退役此卡片`
       break
     case 'high-lapse-rate':
-      description = `遗忘率 ${Math.round(trigger.lapseRate * 100)}%，建议改写问法`
+      description = `遗忘率 ${Math.round(trigger.lapseRate * 100)}%，AI 建议改写问法`
       break
     case 'slow-response':
-      description = `平均回答时间 ${(trigger.avgMs / 1000).toFixed(1)}s，建议添加记忆提示`
+      description = `平均回答时间 ${(trigger.avgMs / 1000).toFixed(1)}s，AI 建议添加记忆提示`
       break
   }
 

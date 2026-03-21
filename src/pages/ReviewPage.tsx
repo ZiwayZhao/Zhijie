@@ -7,7 +7,6 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import type { FlashcardDeck, FlashcardCard } from '@/lib/fsrs'
 import { loadDeck, getDueCards } from '@/lib/fsrs'
-import { initMockFlashcards } from '@/mocks/flashcards'
 import ReviewSession from '@/components/flashcard/ReviewSession'
 
 export default function ReviewPage() {
@@ -19,7 +18,6 @@ export default function ReviewPage() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    initMockFlashcards()
     if (!deckId) {
       setLoading(false)
       return

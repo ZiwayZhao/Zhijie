@@ -17,8 +17,6 @@ import { zhCN } from 'date-fns/locale'
 import type { DailyAgenda, ExamConfig, TodoItem } from '@/lib/agenda-engine'
 import { generateDailyAgenda, loadExamConfigs, loadTodos, saveTodos } from '@/lib/agenda-engine'
 import { loadAllDecks } from '@/lib/fsrs'
-import { initMockAgenda, getMockStudyItems } from '@/mocks/agenda'
-import { initMockFlashcards } from '@/mocks/flashcards'
 import AgendaTimeline from '@/components/agenda/AgendaTimeline'
 import ExamCountdown from '@/components/agenda/ExamCountdown'
 
@@ -81,15 +79,12 @@ export default function AgendaPage() {
   const rebuildAgenda = useCallback((currentTodos: TodoItem[]) => {
     const decks = loadAllDecks()
     const configs = loadExamConfigs()
-    const studyItems = getMockStudyItems()
-    const daily = generateDailyAgenda(decks, configs, studyItems, currentTodos)
+    const daily = generateDailyAgenda(decks, configs, [], currentTodos)
     setAgenda(daily)
     setExamConfigs(configs)
   }, [])
 
   useEffect(() => {
-    initMockFlashcards()
-    initMockAgenda()
     const loadedTodos = loadTodos()
     todosRef.current = loadedTodos
     rebuildAgenda(loadedTodos)

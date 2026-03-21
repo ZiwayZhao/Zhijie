@@ -55,6 +55,7 @@ def create_app() -> FastAPI:
     from app.api.v1.annotations import router as annotations_router
     from app.api.v1.agenda import router as agenda_router
     from app.api.v1.tutor_history import router as tutor_history_router
+    from app.api.v1.card_evolution import router as card_evolution_router
     app.include_router(health_router, prefix=settings.api_v1_prefix)
     app.include_router(auth_router, prefix=settings.api_v1_prefix)
     app.include_router(oauth_router, prefix=settings.api_v1_prefix)
@@ -68,6 +69,7 @@ def create_app() -> FastAPI:
     app.include_router(annotations_router, prefix=settings.api_v1_prefix)
     app.include_router(agenda_router, prefix=settings.api_v1_prefix)
     app.include_router(tutor_history_router, prefix=settings.api_v1_prefix)
+    app.include_router(card_evolution_router, prefix=settings.api_v1_prefix)
 
     return app
 

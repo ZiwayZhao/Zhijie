@@ -6,15 +6,12 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { motion, type Variants } from 'framer-motion'
-import { Clock, Flame, BookOpen, FileCheck, Upload, PenLine, Award, ArrowRight, Layers, HelpCircle } from 'lucide-react'
-import { activities, studyStats } from '@/mocks/activities'
-import type { Activity } from '@/mocks/activities'
+import { Clock, Flame, BookOpen, FileCheck, ArrowRight, Layers, HelpCircle } from 'lucide-react'
 import { fetchCourses, fetchShowcase, type CourseItem, type ShowcaseItem } from '@/lib/api'
 import type { DailyAgenda, TodoItem, ExamConfig } from '@/lib/agenda-engine'
 import { generateDailyAgenda, loadExamConfigs, loadTodos, saveTodos } from '@/lib/agenda-engine'
 import { loadAllDecks } from '@/lib/fsrs'
-import { initMockAgenda, getMockStudyItems } from '@/mocks/agenda'
-import { initMockFlashcards } from '@/mocks/flashcards'
+import { loadProfile } from '@/lib/student-model'
 import DailyPlan from '@/components/agenda/DailyPlan'
 import ExamCountdown from '@/components/agenda/ExamCountdown'
 import { differenceInDays } from 'date-fns'
@@ -119,15 +116,13 @@ function AuthenticatedHomePage() {
   const rebuildAgenda = useCallback((currentTodos: TodoItem[]) => {
     const decks = loadAllDecks()
     const configs = loadExamConfigs()
-    const studyItems = getMockStudyItems()
-    const daily = generateDailyAgenda(decks, configs, studyItems, currentTodos)
+    // No mock study items — real data only (empty until user has analyzed materials)
+    const daily = generateDailyAgenda(decks, configs, [], currentTodos)
     setAgenda(daily)
     setExamConfigs(configs)
   }, [])
 
   useEffect(() => {
-    initMockFlashcards()
-    initMockAgenda()
     const loadedTodos = loadTodos()
     todosRef.current = loadedTodos
     rebuildAgenda(loadedTodos)
@@ -184,10 +179,7 @@ function AuthenticatedHomePage() {
         onAddTodo={handleAddTodo}
       />
 
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-10 overflow-hidden">
-        <FeaturedCoursesSection />
-        <ActivityTimeline />
-      </div>
+      <FeaturedCoursesSection />
     </div>
   )
 }
@@ -199,6 +191,8 @@ function AuthenticatedHomePage() {
 function WelcomeSection() {
   const hour = new Date().getHours()
   const greeting = hour < 12 ? '早上好' : hour < 18 ? '下午好' : '晚上好'
+  const profile = loadProfile()
+  const moduleCount = Object.keys(profile.modules).length
 
   return (
     <motion.div initial="hidden" animate="visible" variants={fadeUp} custom={0}>
@@ -207,22 +201,22 @@ function WelcomeSection() {
       <div className="flex items-center gap-5 text-xs text-text-muted mt-3 font-body tracking-wide uppercase">
         <span className="flex items-center gap-1.5">
           <Clock size={13} strokeWidth={1.5} className="text-red-primary" />
-          今日 {studyStats.todayMinutes} 分钟
+          累计 {profile.totalStudyMinutes} 分钟
         </span>
         <span className="w-px h-3 bg-border-warm" />
         <span className="flex items-center gap-1.5">
           <Flame size={13} strokeWidth={1.5} className="text-accent-gold" />
-          连续 {studyStats.streak} 天
-        </span>
-        <span className="w-px h-3 bg-border-warm" />
-        <span className="flex items-center gap-1.5">
-          <FileCheck size={13} strokeWidth={1.5} className="text-text-muted" />
-          {studyStats.completedMaterials} 份材料
+          连续 {profile.streakDays} 天
         </span>
         <span className="w-px h-3 bg-border-warm" />
         <span className="flex items-center gap-1.5">
           <BookOpen size={13} strokeWidth={1.5} className="text-text-muted" />
-          本周 {Math.round(studyStats.weekMinutes / 60)} 小时
+          {moduleCount} 个模块
+        </span>
+        <span className="w-px h-3 bg-border-warm" />
+        <span className="flex items-center gap-1.5">
+          <FileCheck size={13} strokeWidth={1.5} className="text-text-muted" />
+          {loadAllDecks().length} 套闪卡
         </span>
       </div>
     </motion.div>
@@ -338,43 +332,3 @@ function FeaturedCoursesSection() {
   )
 }
 
-const activityIcons: Record<Activity['type'], typeof Upload> = {
-  upload: Upload,
-  study: BookOpen,
-  note: PenLine,
-  quiz: Award,
-}
-
-function ActivityTimeline() {
-  return (
-    <motion.section initial="hidden" animate="visible" variants={fadeUp} custom={6}>
-      <div className="flex items-center gap-3 mb-5">
-        <div className="w-8 h-[2px] bg-border-warm rounded-full" />
-        <h2 className="font-heading text-lg text-text-main">学习动态</h2>
-      </div>
-      <div className="border-l-2 border-border-warm pl-5 space-y-0">
-        {activities.map((a, i) => {
-          const Icon = activityIcons[a.type]
-          return (
-            <motion.div
-              key={a.id}
-              variants={fadeUp}
-              custom={i + 7}
-              className="flex gap-3 py-3 border-b border-border-warm/60 last:border-b-0"
-            >
-              <div className="w-6 h-6 shrink-0 rounded-full bg-bg-accent flex items-center justify-center mt-0.5">
-                <Icon size={12} className="text-red-primary" strokeWidth={1.5} />
-              </div>
-              <div className="min-w-0">
-                <p className="text-sm text-text-body leading-snug">{a.message}</p>
-                <p className="text-[11px] text-text-muted mt-1 font-body">
-                  {a.courseName} · {a.time}
-                </p>
-              </div>
-            </motion.div>
-          )
-        })}
-      </div>
-    </motion.section>
-  )
-}

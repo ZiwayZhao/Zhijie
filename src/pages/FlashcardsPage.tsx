@@ -6,14 +6,12 @@ import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import type { FlashcardDeck } from '@/lib/fsrs'
 import { loadAllDecks, getDueCards } from '@/lib/fsrs'
-import { initMockFlashcards } from '@/mocks/flashcards'
 import DeckList from '@/components/flashcard/DeckList'
 
 export default function FlashcardsPage() {
   const [decks, setDecks] = useState<FlashcardDeck[]>([])
 
   useEffect(() => {
-    initMockFlashcards()
     setDecks(loadAllDecks())
   }, [])
 

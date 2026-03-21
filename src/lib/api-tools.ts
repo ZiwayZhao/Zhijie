@@ -149,38 +149,6 @@ export async function toolReadingNotes(
 
 /* ---------- Chat API Functions (SSE streaming) ---------- */
 
-export async function streamSocraticChat(
-  params: {
-    moduleId: string
-    moduleName: string
-    userMessage: string
-    scaffoldLevel: 'full' | 'moderate' | 'minimal'
-    mastery: number
-    conversationHistory: { role: string; content: string }[]
-    specialistContext: string
-  },
-  onToken: (text: string) => void,
-): Promise<void> {
-  const res = await authFetch(`${AUTH_API}/chat/socratic`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      module_id: params.moduleId,
-      module_name: params.moduleName,
-      user_message: params.userMessage,
-      scaffold_level: params.scaffoldLevel,
-      mastery: params.mastery,
-      conversation_history: params.conversationHistory,
-      specialist_context: params.specialistContext,
-    }),
-  })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: '对话启动失败' }))
-    throw new Error(err.detail || `Socratic chat failed: ${res.status}`)
-  }
-  await consumeSSEStream(res, onToken)
-}
-
 export async function streamKnowledgeQA(
   params: {
     materialId: string

@@ -130,4 +130,9 @@ export function saveExamProfile(courseId: string, profile: ExamProfile): void {
     question_distribution: recalcPercentages(profile.question_distribution, totalPoints),
   }
   localStorage.setItem(storageKey(courseId), JSON.stringify(normalized))
+
+  // Fire-and-forget backend sync
+  import('@/lib/sync-service').then(({ debouncedSyncExamProfileUp }) => {
+    debouncedSyncExamProfileUp(courseId, normalized)
+  })
 }

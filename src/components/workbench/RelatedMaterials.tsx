@@ -1,7 +1,15 @@
 import { motion } from 'framer-motion'
 import { Link } from 'react-router-dom'
 import { FileText, ChevronRight } from 'lucide-react'
-import type { Material } from '@/mocks/materials'
+interface Material {
+  id: string
+  courseId: string
+  name: string
+  type: string
+  uploader: string
+  uploadTime: string
+  fileSize: string
+}
 
 interface RelatedMaterialsProps {
   materials: Material[]

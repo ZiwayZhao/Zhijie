@@ -550,3 +550,27 @@ export const debouncedSyncTutorUp = debouncedSync(
     syncTutorMessagesUp(materialId, messages),
   5000,
 )
+
+/* ------------------------------------------------------------------ */
+/*  7. Exam Profile sync                                               */
+/* ------------------------------------------------------------------ */
+
+async function syncExamProfileUp(courseId: string, profile: import('@/lib/exam-profile').ExamProfile): Promise<void> {
+  if (_suppressSyncUp || !isAuthenticated()) return
+  await syncPut(`${API_V1}/exam/profile/${encodeURIComponent(courseId)}`, {
+    exam_date: profile.exam_date ?? null,
+    duration_minutes: profile.duration_minutes ?? null,
+    is_open_book: profile.is_open_book ?? false,
+    calculator_allowed: profile.calculator_allowed ?? false,
+    total_points: profile.total_points,
+    question_distribution: profile.question_distribution,
+    source: profile.source,
+  })
+}
+
+/** Debounced exam profile sync (2s delay) */
+export const debouncedSyncExamProfileUp = debouncedSync(
+  'exam-profile',
+  syncExamProfileUp,
+  2000,
+)

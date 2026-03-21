@@ -1,11 +1,10 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { ArrowLeft, MessageCircle, BookOpen, Loader2, Wrench } from 'lucide-react'
+import { ArrowLeft, MessageCircle, Loader2, Wrench } from 'lucide-react'
 import { fetchCourse, fetchMaterial, type CourseItem, type MaterialItem } from '@/lib/api'
 import MaterialReader from '@/components/workbench/MaterialReader'
 import AIToolPanel from '@/components/workbench/AIToolPanel'
-import SocraticChat from '@/components/workbench/SocraticChat'
 import TutorSidebar from '@/components/tutor/TutorSidebar'
 import ErrorBoundary from '@/components/ErrorBoundary'
 import { loadProfile } from '@/lib/student-model'
@@ -22,7 +21,6 @@ export default function WorkbenchPage() {
   const [specialistMarkdown, setSpecialistMarkdown] = useState<string | null>(null)
   const [quizQuestions, setQuizQuestions] = useState<MCQuestion[]>([])
   const [activeTab, setActiveTab] = useState('original')
-  const [showSocratic, setShowSocratic] = useState(false)
   const [currentModuleId, setCurrentModuleId] = useState<string | null>(null)
   const [currentModuleName, setCurrentModuleName] = useState<string | null>(null)
   const [sidebarTab, setSidebarTab] = useState<'tools' | 'tutor'>('tutor')
@@ -130,42 +128,32 @@ export default function WorkbenchPage() {
           />
         </ErrorBoundary>
 
-        {/* Socratic dialogue toggle — elegant editorial style */}
-        {specialistMarkdown && currentModuleId && (
+        {/* CTA: switch to AI Tutor tab for Socratic dialogue */}
+        {specialistMarkdown && currentModuleId && sidebarTab !== 'tutor' && (
           <motion.div
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.2, duration: 0.3 }}
             className="mt-8"
           >
-            {showSocratic ? (
-              <SocraticChat
-                moduleId={currentModuleId}
-                moduleName={currentModuleName || currentModuleId}
-                mastery={loadProfile().modules[currentModuleId]?.mastery ?? 0.3}
-                onClose={() => setShowSocratic(false)}
-              />
-            ) : (
-              <button
-                onClick={() => setShowSocratic(true)}
-                className="group flex items-center gap-3 w-full py-4 px-5 border border-border-warm rounded-sm
-                           bg-bg-card hover:border-red-primary transition-colors text-left"
-              >
-                <div className="w-8 h-8 flex items-center justify-center border border-border-warm
-                                group-hover:border-red-primary transition-colors">
-                  <MessageCircle size={15} strokeWidth={1.5} className="text-text-muted group-hover:text-red-primary transition-colors" />
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-text-main group-hover:text-red-primary transition-colors">
-                    开启苏格拉底对话
-                  </p>
-                  <p className="text-xs text-text-muted mt-0.5">
-                    通过提问引导深入理解概念
-                  </p>
-                </div>
-                <BookOpen size={14} strokeWidth={1.5} className="ml-auto text-border-warm group-hover:text-red-primary transition-colors" />
-              </button>
-            )}
+            <button
+              onClick={() => setSidebarTab('tutor')}
+              className="group flex items-center gap-3 w-full py-4 px-5 border border-border-warm rounded-sm
+                         bg-bg-card hover:border-red-primary transition-colors text-left"
+            >
+              <div className="w-8 h-8 flex items-center justify-center border border-border-warm
+                              group-hover:border-red-primary transition-colors">
+                <MessageCircle size={15} strokeWidth={1.5} className="text-text-muted group-hover:text-red-primary transition-colors" />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-text-main group-hover:text-red-primary transition-colors">
+                  向 AI 助教提问
+                </p>
+                <p className="text-xs text-text-muted mt-0.5">
+                  AI 助教用苏格拉底式提问引导你深入理解
+                </p>
+              </div>
+            </button>
           </motion.div>
         )}
 
