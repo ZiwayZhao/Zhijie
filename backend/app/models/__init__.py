@@ -9,3 +9,5 @@ from app.models.disassembly import (  # noqa: F401
     QuizData,
 )
 from app.models.course import CourseCategory, Course, CourseMaterialSource  # noqa: F401
+from app.models.student_profile import StudentProfile  # noqa: F401
+from app.models.tutor_session import TutorSession  # noqa: F401
