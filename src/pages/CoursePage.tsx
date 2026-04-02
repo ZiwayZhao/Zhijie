@@ -64,12 +64,20 @@ export default function CoursePage() {
 
   if (error || !course) {
     return (
-      <div className="p-8">
-        <h1 className="font-heading text-2xl text-text-main">{error || '课程未找到'}</h1>
-        <p className="text-text-muted mt-2">请检查链接是否正确。</p>
-        <Link to="/explore" className="text-red-primary text-sm mt-4 inline-block">
-          返回知识网络
-        </Link>
+      <div className="p-8 lg:p-10 max-w-6xl">
+        <div className="py-16 text-center border border-border-warm rounded-sm bg-bg-card">
+          <BookMarked size={40} className="mx-auto text-text-muted mb-4" strokeWidth={1} />
+          <h1 className="font-heading text-2xl text-text-main">{error || '课程未找到'}</h1>
+          <p className="text-text-muted text-sm mt-2">请检查链接是否正确，或返回知识网络浏览其他课程。</p>
+          <Link
+            to="/explore"
+            className="inline-flex items-center gap-1.5 mt-6 px-5 py-2.5 text-sm
+                       border border-red-primary text-red-primary rounded-sm
+                       hover:bg-red-primary hover:text-white transition-colors no-underline"
+          >
+            返回知识网络
+          </Link>
+        </div>
       </div>
     )
   }
@@ -408,14 +416,39 @@ function CourseSidebar({ course, related, resourceTotal }: { course: CourseItem;
 function CourseSkeleton() {
   return (
     <div className="p-8 lg:p-10 max-w-6xl animate-pulse">
+      {/* Header skeleton */}
       <div className="border-b border-border-warm pb-8">
         <div className="h-3 w-32 bg-border-warm rounded mb-5" />
         <div className="h-3 w-20 bg-border-warm rounded mb-2" />
         <div className="h-10 w-2/3 bg-border-warm rounded mb-2" />
         <div className="h-5 w-40 bg-border-warm rounded mb-4" />
-        <div className="h-px w-12 bg-border-warm mb-4" />
+        <div className="h-px w-12 bg-red-primary/20 mb-4" />
         <div className="h-4 w-full bg-border-warm rounded mb-2" />
         <div className="h-4 w-3/4 bg-border-warm rounded" />
+      </div>
+
+      {/* Content + sidebar skeleton */}
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-10 mt-10">
+        {/* Content area */}
+        <div className="space-y-4">
+          <div className="h-5 w-28 bg-border-warm rounded" />
+          <div className="h-7 w-48 bg-border-warm rounded" />
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="h-12 w-full bg-border-warm rounded" />
+          ))}
+        </div>
+
+        {/* Sidebar */}
+        <div className="border border-border-warm rounded-sm p-6 space-y-4">
+          <div className="h-4 w-20 bg-border-warm rounded" />
+          <div className="h-px bg-border-warm" />
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="flex justify-between">
+              <div className="h-4 w-16 bg-border-warm rounded" />
+              <div className="h-4 w-12 bg-border-warm rounded" />
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   )

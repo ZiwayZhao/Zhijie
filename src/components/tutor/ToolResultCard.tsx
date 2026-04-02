@@ -45,7 +45,8 @@ export default function ToolResultCard({
         {onViewSpecialist && (
           <button
             onClick={() => onViewSpecialist(data)}
-            className="text-red-primary hover:underline whitespace-nowrap"
+            className="text-red-primary hover:underline whitespace-nowrap
+                       focus:outline-none focus:ring-1 focus:ring-red-primary/40 rounded-sm px-1 -mx-1"
           >
             查看精讲
           </button>
@@ -66,7 +67,8 @@ export default function ToolResultCard({
         {onViewQuiz && (
           <button
             onClick={() => onViewQuiz(data)}
-            className="text-red-primary hover:underline whitespace-nowrap"
+            className="text-red-primary hover:underline whitespace-nowrap
+                       focus:outline-none focus:ring-1 focus:ring-red-primary/40 rounded-sm px-1 -mx-1"
           >
             查看测验
           </button>

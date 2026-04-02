@@ -32,7 +32,7 @@ export default function PlanIndicator({ plan }: PlanIndicatorProps) {
         <Icon size={12} strokeWidth={1.5} />
         <span>{config.label}</span>
         {plan.tools.length > 0 && (
-          <span className="text-border-warm">
+          <span className="text-text-muted/60">
             · {plan.tools.join(', ')}
           </span>
         )}

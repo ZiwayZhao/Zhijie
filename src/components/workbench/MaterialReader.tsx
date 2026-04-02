@@ -328,7 +328,7 @@ const mdComponents = {
     if (isBlock) {
       return (
         <code
-          className="block bg-[#1a1a1a] text-[#e5e5e5] p-4 rounded-md overflow-x-auto text-sm font-mono my-4"
+          className="block bg-text-main text-bg-main p-4 rounded-sm overflow-x-auto text-sm font-mono my-4"
           {...props}
         >
           {children}

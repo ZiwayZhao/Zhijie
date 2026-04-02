@@ -81,6 +81,18 @@ export function ToolProgress({
             )}
           </div>
         </div>
+
+        {/* Multi-step progress bar */}
+        {isMultiStep && currentStep !== null && totalSteps !== null && (
+          <div className="h-1 w-full bg-border-warm rounded-full overflow-hidden mt-2">
+            <motion.div
+              className="h-full bg-red-primary rounded-full"
+              initial={{ width: 0 }}
+              animate={{ width: `${Math.round((currentStep / totalSteps) * 100)}%` }}
+              transition={{ duration: 0.3, ease: 'easeOut' }}
+            />
+          </div>
+        )}
       </motion.div>
     </AnimatePresence>
   )

@@ -216,8 +216,30 @@ function tutorReducer(state: TutorState, action: TutorAction): TutorState {
       }
     }
 
-    case 'SESSION_COMPLETED':
+    case 'SESSION_COMPLETED': {
+      // If stream ended with un-finalized streaming content, commit it as an assistant message
+      if (state.streamingContent.trim()) {
+        const assistantMsg: TutorMessage = {
+          id: genId(),
+          role: 'assistant',
+          content: state.streamingContent,
+          timestamp: Date.now(),
+          plan: state.currentPlan ?? undefined,
+          toolResults:
+            state.currentToolResults.length > 0
+              ? state.currentToolResults
+              : undefined,
+        }
+        return {
+          ...state,
+          phase: 'idle',
+          messages: [...state.messages, assistantMsg],
+          streamingContent: '',
+          degradedMessage: null,
+        }
+      }
       return { ...state, phase: 'idle', degradedMessage: null }
+    }
 
     case 'CONTEXT_COMPRESSED': {
       // Insert a system message showing compression happened (D5)
@@ -448,7 +470,8 @@ export function useTutorSession(
           dispatch({ type: 'CONNECTION_ERROR', error: error.message })
         },
         () => {
-          // SSE stream ended — if still answering, treat as completed
+          // SSE stream ended without session.completed — finalize any in-progress answer
+          dispatch({ type: 'SESSION_COMPLETED' })
         },
       )
 
