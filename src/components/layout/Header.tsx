@@ -19,7 +19,10 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
   const location = useLocation()
   const navigate = useNavigate()
   const { user, isAuthenticated, logout } = useAuth()
-  const title = pageTitles[location.pathname] ?? '智阶'
+  const title = pageTitles[location.pathname]
+    ?? (location.pathname.endsWith('/study') ? '学习台' : null)
+    ?? (location.pathname.includes('/dev/per-page') ? '对照阅读' : null)
+    ?? '智阶'
 
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)

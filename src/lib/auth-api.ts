@@ -148,8 +148,12 @@ export async function register(payload: RegisterPayload): Promise<TokenPair> {
   })
 
   if (!res.ok) {
-    const err = (await res.json().catch(() => ({ detail: 'Registration failed' }))) as ApiError
-    throw new Error(err.detail)
+    const err = await res.json().catch(() => null)
+    const detail = err?.detail
+    const msg = typeof detail === 'string' ? detail
+      : Array.isArray(detail) ? detail.map((e: any) => e?.msg || String(e)).join('; ')
+      : 'Registration failed'
+    throw new Error(msg)
   }
 
   const tokens = (await res.json()) as TokenPair
@@ -165,8 +169,12 @@ export async function login(payload: LoginPayload): Promise<TokenPair> {
   })
 
   if (!res.ok) {
-    const err = (await res.json().catch(() => ({ detail: 'Login failed' }))) as ApiError
-    throw new Error(err.detail)
+    const err = await res.json().catch(() => null)
+    const detail = err?.detail
+    const msg = typeof detail === 'string' ? detail
+      : Array.isArray(detail) ? detail.map((e: any) => e?.msg || String(e)).join('; ')
+      : 'Login failed'
+    throw new Error(msg)
   }
 
   const tokens = (await res.json()) as TokenPair

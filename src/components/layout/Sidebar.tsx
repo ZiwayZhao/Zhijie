@@ -10,6 +10,7 @@ import {
   Brain,
   Settings,
   X,
+  SplitSquareHorizontal,
 } from 'lucide-react'
 
 const mainNav = [
@@ -17,6 +18,7 @@ const mainNav = [
   { to: '/agenda', label: '学习日程', icon: CalendarDays },
   { to: '/explore', label: '知识网络', icon: Compass },
   { to: '/upload', label: '上传', icon: Upload },
+  { to: '/dev/per-page', label: '对照阅读', icon: SplitSquareHorizontal },
 ]
 
 const libraryNav = [

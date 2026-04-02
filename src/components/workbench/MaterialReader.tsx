@@ -3,6 +3,7 @@ import { motion } from 'framer-motion'
 import { FileText, Calendar, BookOpen, Loader2 } from 'lucide-react'
 
 const PdfAnnotator = lazy(() => import('./PdfAnnotator'))
+const PerPageViewer = lazy(() => import('./PerPageViewer'))
 import ErrorBoundary from '@/components/ErrorBoundary'
 import ReactMarkdown from 'react-markdown'
 import remarkMath from 'remark-math'
@@ -20,6 +21,7 @@ interface MaterialReaderProps {
   courseName?: string
   courseSchool?: string
   specialistMarkdown?: string | null
+  perPageMarkdown?: string | null
   quizQuestions?: MCQuestion[]
   activeTab?: string
   onTabChange?: (tab: string) => void
@@ -62,6 +64,7 @@ export default function MaterialReader({
   courseName,
   courseSchool,
   specialistMarkdown,
+  perPageMarkdown,
   quizQuestions,
   activeTab: controlledTab,
   onTabChange,
@@ -78,9 +81,11 @@ export default function MaterialReader({
   const pdfUrl = isPdf && material.downloadUrl ? material.downloadUrl : null
 
   const hasQuiz = !!quizQuestions && quizQuestions.length > 0
+  const hasPerPage = !!perPageMarkdown && perPageMarkdown.length > 0
   const tabs: TabDef[] = [
     { key: 'original', label: '原文', available: true },
     { key: 'specialist', label: 'AI 精讲', available: !!specialistMarkdown },
+    { key: 'per-page', label: '逐页精讲', available: hasPerPage },
     { key: 'quiz', label: `自测验${hasQuiz ? ` (${quizQuestions!.length})` : ''}`, available: hasQuiz },
   ]
 
@@ -110,6 +115,23 @@ export default function MaterialReader({
           >
             {fixMarkdown(specialistMarkdown)}
           </ReactMarkdown>
+        </div>
+      )}
+      {activeTab === 'per-page' && hasPerPage && pdfUrl && (
+        <div className="min-h-[500px]">
+          <Suspense
+            fallback={
+              <div className="flex items-center justify-center h-[400px]">
+                <Loader2 size={20} className="animate-spin text-red-primary/60" />
+              </div>
+            }
+          >
+            <PerPageViewer
+              pdfSource={pdfUrl}
+              lectureMarkdown={perPageMarkdown!}
+              title={material.title}
+            />
+          </Suspense>
         </div>
       )}
       {activeTab === 'quiz' && hasQuiz && (

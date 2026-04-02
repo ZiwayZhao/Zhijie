@@ -33,6 +33,8 @@ export {
 
 export interface CourseItem {
   id: string
+  /** Original UUID from the backend (use this for API calls that require course_id) */
+  courseUuid: string
   name: string
   slug: string
   school: string
@@ -71,6 +73,7 @@ export interface CategoryItem {
 function mapCourse(raw: any): CourseItem {
   return {
     id: raw.slug,
+    courseUuid: raw.id || raw.slug,
     name: raw.name,
     slug: raw.slug,
     school: raw.university || '',
@@ -247,6 +250,21 @@ export async function fetchMaterial(materialId: string): Promise<MaterialItem> {
 /** Max upload size: 50 MB */
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 
+/** Extract a human-readable message from a backend error response body. */
+function extractErrorMessage(err: any, fallback: string): string {
+  if (!err) return fallback
+  if (typeof err.detail === 'string') return err.detail
+  // FastAPI validation errors return detail as an array of objects
+  if (Array.isArray(err.detail)) {
+    return err.detail
+      .map((e: any) => (typeof e === 'string' ? e : e?.msg || JSON.stringify(e)))
+      .join('; ')
+  }
+  if (typeof err.detail === 'object') return JSON.stringify(err.detail)
+  if (typeof err.message === 'string') return err.message
+  return fallback
+}
+
 export async function requestUpload(params: {
   filename: string
   contentType: string
@@ -276,8 +294,8 @@ export async function requestUpload(params: {
     }),
   })
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: 'Upload request failed' }))
-    throw new Error(err.detail || `Upload request failed: ${res.status}`)
+    const err = await res.json().catch(() => null)
+    throw new Error(extractErrorMessage(err, `Upload request failed: ${res.status}`))
   }
   const data = await res.json()
   return { materialId: data.material_id, uploadUrl: data.upload_url, s3Key: data.s3_key }
@@ -297,8 +315,8 @@ export async function confirmUpload(materialId: string): Promise<void> {
     method: 'POST',
   })
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: 'Confirm failed' }))
-    throw new Error(err.detail || `Confirm failed: ${res.status}`)
+    const err = await res.json().catch(() => null)
+    throw new Error(extractErrorMessage(err, `Confirm failed: ${res.status}`))
   }
 }
 

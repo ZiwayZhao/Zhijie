@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { motion, type Variants } from 'framer-motion'
-import { BookMarked, Users, Star, Globe, ExternalLink, Upload, Clock, Code2, GraduationCap, FileText, Video, FileCode, File } from 'lucide-react'
+import { BookMarked, Users, Star, Globe, ExternalLink, Upload, Clock, Code2, GraduationCap, FileText, Video, FileCode, File, SplitSquareHorizontal } from 'lucide-react'
 import { fetchCourse, fetchCourses, fetchCourseResources, type CourseItem, type CourseResourceItem } from '@/lib/api'
 
 /** Only allow http/https URLs to prevent javascript:/data: XSS */
@@ -230,15 +230,26 @@ function CourseContent({
             课程材料 <span className="text-base text-text-muted font-body">({resourceTotal})</span>
           </h2>
         </div>
-        <Link
-          to="/upload"
-          className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium
-                     border border-red-primary text-red-primary rounded-sm
-                     hover:bg-red-primary hover:text-white transition-colors no-underline"
-        >
-          <Upload size={14} strokeWidth={1.5} />
-          上传材料
-        </Link>
+        <div className="flex items-center gap-3">
+          <Link
+            to={`/course/${course.slug}/study`}
+            className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium
+                       bg-red-primary text-white rounded-sm
+                       hover:bg-red-dark transition-colors no-underline"
+          >
+            <SplitSquareHorizontal size={14} strokeWidth={1.5} />
+            进入学习台
+          </Link>
+          <Link
+            to="/upload"
+            className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium
+                       border border-red-primary text-red-primary rounded-sm
+                       hover:bg-red-primary hover:text-white transition-colors no-underline"
+          >
+            <Upload size={14} strokeWidth={1.5} />
+            上传材料
+          </Link>
+        </div>
       </div>
 
       {resourceTotal > 0 ? (
