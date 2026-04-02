@@ -1,6 +1,13 @@
-"""Tutor Orchestrator — two-phase plan→execute→stream architecture.
+"""Tutor Orchestrator — Agent QueryLoop architecture.
 
-State machine: INIT → PLANNING → EXECUTING_TOOLS → STREAMING → COMPLETED
+State machine: INIT → PLANNING → [EXECUTING_TOOLS → SYNTHESIZING]* → STREAMING → COMPLETED
+
+Wave 1 enhancements (inspired by Claude Code's AsyncGenerator QueryLoop):
+- Multi-step plan: complex queries decompose into 1-3 steps
+- Iterative execute-synthesize loop: each step executes tools + synthesizes
+- Only final step streams the answer to the user
+- Context compression integration (Snip + Auto layers)
+- Tool registry integration
 
 Usage:
     orchestrator = TutorOrchestrator(db, user_id)
@@ -20,9 +27,23 @@ from app.models.disassembly import DisassemblyTask
 from app.schemas.tutor import (
     TutorChatRequest,
     TutorPlanOutput,
+    TutorPlanStep,
+    TutorMultiStepPlan,
     TutorToolResult,
 )
 from app.services.llm_client import get_llm_client, LLMError
+from app.services.prompt_builder import (
+    TutorPromptBuilder,
+    TutorMode,
+    StudentContext,
+    SessionContext,
+)
+from app.services.context_compressor import ContextCompressor
+from app.services.student_model import StudentModelService
+from app.services.diagnosis_flow import DiagnosisFlow, DiagnosisStage
+from app.services.session_memory import SessionMemoryExtractor, memory_to_dict
+from app.services.hook_system import get_hook_registry
+from app.services.tool_permissions import ToolPermissions, PermissionState
 from app.services.tutor_tools import run_tool
 
 logger = logging.getLogger(__name__)
@@ -31,9 +52,29 @@ logger = logging.getLogger(__name__)
 
 PLAN_MODEL = "z-ai/glm-4.7-flash"  # Free, fast — good for planning
 CHAT_MODEL = "z-ai/glm-5-turbo-20260315"  # Quality dialogue
+FALLBACK_CHAT_MODEL = "z-ai/glm-4.7-flash"  # Fallback when primary overloaded
 
-MAX_TOOL_CALLS_PER_TURN = 2
-MAX_CONTEXT_CHARS = 8000
+MAX_TOOL_CALLS_PER_STEP = 2
+MAX_LOOP_ITERATIONS = 3  # Safety cap for multi-step plans
+MAX_CONTEXT_CHARS = 12000  # Increased for multi-step results
+
+# Prompt builder singleton
+_prompt_builder = TutorPromptBuilder()
+
+# Context compressor singleton
+_compressor = ContextCompressor(max_context_tokens=24000)
+
+# Diagnosis flow singleton (stateless logic)
+_diagnosis = DiagnosisFlow()
+
+# Session memory extractor singleton
+_memory_extractor = SessionMemoryExtractor()
+
+# Hook registry singleton (Wave 3)
+_hook_registry = get_hook_registry()
+
+# Tool permissions singleton (Wave 3)
+_permissions = ToolPermissions()
 
 
 # ── System Prompts ───────────────────────────────────────────────
@@ -65,17 +106,39 @@ PLAN_SYSTEM = """你是一个学习助教的意图分析器。根据用户消息
 - "你好/谢谢" → answer_direct, tools=[]
 - "我学的怎么样" → quiz, tools=["get_quiz"], module_hint=null"""
 
-ANSWER_SYSTEM = """你是智阶学习助教，一位耐心、专业的大学课程辅导老师。
+MULTI_STEP_PLAN_SYSTEM = """你是一个学习助教的意图分析器。分析用户的复合请求，拆解为 1-3 个执行步骤。
 
-核心原则：
-- 基于提供的材料内容回答，不编造信息
-- 如果材料中没有相关内容，诚实说明
-- 用苏格拉底式提问引导思考，而非直接给答案
-- 回复控制在 300 字以内
-- 使用中文回复
-- 可以用 LaTeX 公式（$行内$ 或 $$独立$$）
+可用工具：
+{available_tools_desc}
 
-{tool_context}"""
+**规则**：
+- 简单请求（讲解一个概念、出题、问候）→ 单步计划
+- 复合请求（讲A再讲B、讲完出题、对比两个概念）→ 多步计划
+- 每步最多 2 个工具
+- 总共最多 3 步
+- 每步需要 module_hint 指明目标模块
+
+示例：
+输入："讲讲视图然后出题"
+输出：2步 — Step1: explain["get_specialist"] hint="视图" / Step2: quiz["get_quiz"] hint="视图"
+
+输入："讲讲 JOIN"
+输出：1步 — Step1: explain["get_specialist"] hint="JOIN"
+
+输入："对比视图和子查询"
+输出：2步 — Step1: explain["get_specialist"] hint="视图" / Step2: explain["get_specialist"] hint="子查询"（最终回答合成对比）
+
+输入："你好"
+输出：1步 — Step1: answer_direct[] hint=null"""
+
+SYNTHESIS_SYSTEM = """请简要总结以下工具查询的结果要点（200字以内），用于后续步骤的上下文参考。
+只保留关键概念、定义和重要细节。"""
+
+# Tool call human-readable descriptions for UI
+TOOL_CALL_DESCRIPTIONS = {
+    "get_specialist": "正在查阅课程精讲笔记...",
+    "get_quiz": "正在准备测验题目...",
+}
 
 TOOL_DESCRIPTIONS = {
     "get_specialist": "get_specialist: 获取模块精讲笔记（含概念解释、考点、易错点）",
@@ -88,27 +151,68 @@ NO_TOOLS_NOTICE = "当前材料尚未完成分析，无法使用学习工具。�
 # ── Orchestrator ─────────────────────────────────────────────────
 
 class TutorOrchestrator:
-    """Two-phase orchestrator: plan → execute → stream."""
+    """Agent QueryLoop orchestrator: plan → [execute → synthesize]* → stream."""
 
     def __init__(self, db: AsyncSession, user_id: uuid.UUID):
         self._db = db
         self._user_id = user_id
         self._llm = get_llm_client()
+        self._student_model = StudentModelService(db)
 
     async def stream_chat(
         self, request: TutorChatRequest,
     ) -> AsyncGenerator[dict, None]:
         """Full orchestration loop yielding SSE event dicts.
 
-        Each event: {"event": str, "data": str(json)}
+        Supports multi-step plans: each step executes tools and synthesizes,
+        only the final step streams the answer.
         """
         session_id = uuid.uuid4().hex[:16]
 
         try:
-            # ── Phase 0: Build Context ───────────────────────────
-            available_tools = await self._build_context(
-                request.material_id,
+            # ── Phase 0: Build Context + Student Profile ────────
+            available_tools = await self._build_context(request.material_id)
+
+            # Load student context (Wave 2)
+            student_ctx = await self._student_model.build_student_context(
+                self._user_id, request.material_id,
             )
+
+            # Check if diagnosis is needed (Wave 2)
+            profile = await self._student_model.get_or_create_profile(
+                self._user_id, request.material_id,
+            )
+            diagnosis_prompt = ""
+            if _diagnosis.is_diagnosis_needed(
+                {"self_report": profile.self_report, "preferred_mode": profile.preferred_mode},
+            ):
+                diag_state = _diagnosis.get_initial_state()
+                diagnosis_prompt = _diagnosis.get_diagnosis_prompt(diag_state)
+
+                # Try to extract diagnosis data from user message
+                new_state, extracted = _diagnosis.try_extract(
+                    request.user_message, diag_state,
+                )
+                if extracted:
+                    # Persist extracted self-report data
+                    sr_updates = {}
+                    if "learning_mode" in extracted:
+                        profile.preferred_mode = extracted["learning_mode"]
+                        sr_updates["learning_mode"] = extracted["learning_mode"]
+                    if "covered_chapters" in extracted:
+                        sr_updates["covered_chapters"] = extracted["covered_chapters"]
+                    if "weak_areas" in extracted:
+                        sr_updates["weak_areas"] = extracted["weak_areas"]
+                    if "exam_date" in extracted:
+                        sr_updates["exam_date"] = extracted["exam_date"]
+                    if sr_updates:
+                        await self._student_model.update_self_report(
+                            self._user_id, request.material_id, sr_updates,
+                        )
+                        # Rebuild student context with new data
+                        student_ctx = await self._student_model.build_student_context(
+                            self._user_id, request.material_id,
+                        )
 
             yield self._sse(
                 "session.started",
@@ -120,6 +224,24 @@ class TutorOrchestrator:
                 },
             )
 
+            # ── Phase 0.5: Context Compression ──────────────────
+            compressed_history = [
+                {"role": m.role, "content": m.content}
+                for m in request.conversation_history
+            ]
+            compression = await _compressor.maybe_compress(compressed_history)
+            if compression.trigger != "none":
+                compressed_history = compression.messages
+                yield self._sse(
+                    "context.compressed",
+                    {
+                        "summary": compression.summary or "",
+                        "tokens_before": compression.tokens_before,
+                        "tokens_after": compression.tokens_after,
+                        "trigger": compression.trigger,
+                    },
+                )
+
             # ── Phase 1: Plan ────────────────────────────────────
             plan = await self._plan(
                 user_message=request.user_message,
@@ -127,46 +249,137 @@ class TutorOrchestrator:
                 available_tools=available_tools,
             )
 
+            # Convert to multi-step plan
+            steps = self._to_steps(plan)
+
             yield self._sse(
                 "plan.completed",
                 {
                     "intent": plan.intent,
                     "reasoning": plan.reasoning,
                     "tools_to_call": plan.tools_to_call,
+                    "steps": [
+                        {
+                            "step_id": s.step_id,
+                            "intent": s.intent,
+                            "tools_to_call": s.tools_to_call,
+                            "module_hint": s.module_hint,
+                            "description": s.description,
+                        }
+                        for s in steps
+                    ],
+                    "is_multi_step": len(steps) > 1,
                 },
             )
 
-            # ── Phase 2: Execute Tools ───────────────────────────
-            tool_results: list[TutorToolResult] = []
+            # ── Phase 2: QueryLoop — iterate steps ──────────────
+            accumulated_context: list[str] = []
+            all_tool_results: list[TutorToolResult] = []
 
-            for tool_name in plan.tools_to_call[:MAX_TOOL_CALLS_PER_TURN]:
-                result = await run_tool(
-                    tool_name=tool_name,
-                    db=self._db,
-                    material_id=request.material_id,
-                    user_id=self._user_id,
-                    module_id=request.module_id,
-                    module_hint=plan.module_hint,
-                )
-                tool_results.append(result)
+            for step_idx, step in enumerate(steps):
+                is_last = step_idx == len(steps) - 1
 
-                yield self._sse(
-                    "tool.result",
-                    {
-                        "tool_name": result.tool_name,
-                        "ok": result.ok,
-                        "data": result.data,
-                        "error": result.error.model_dump() if result.error else None,
-                    },
-                )
+                # Emit loop progress
+                if len(steps) > 1:
+                    yield self._sse(
+                        "loop.step_start",
+                        {
+                            "step": step.step_id,
+                            "total_steps": len(steps),
+                            "description": step.description,
+                        },
+                    )
 
-            # ── Phase 3: Stream Answer ───────────────────────────
+                # Execute tools for this step
+                step_results: list[TutorToolResult] = []
+                for tool_name in step.tools_to_call[:MAX_TOOL_CALLS_PER_STEP]:
+                    description = TOOL_CALL_DESCRIPTIONS.get(
+                        tool_name, f"正在执行 {tool_name}..."
+                    )
+                    yield self._sse(
+                        "tool_call.start",
+                        {"tool_name": tool_name, "description": description},
+                    )
+
+                    # Check permission (Wave 3)
+                    perm = _permissions.check(tool_name)
+                    if perm == PermissionState.DENY:
+                        logger.warning("Tool '%s' denied by permissions", tool_name)
+                        continue
+
+                    import time as _time
+                    _tool_start = _time.time()
+
+                    result = await run_tool(
+                        tool_name=tool_name,
+                        db=self._db,
+                        material_id=request.material_id,
+                        user_id=self._user_id,
+                        module_id=request.module_id,
+                        module_hint=step.module_hint or plan.module_hint,
+                    )
+
+                    # Run post-tool hooks (Wave 3)
+                    try:
+                        hook_ctx = {
+                            "start_time": _tool_start,
+                            "session_id": session_id,
+                            "user_id": str(self._user_id),
+                        }
+                        result_dict = {
+                            "ok": result.ok,
+                            "data": result.data,
+                            "error": result.error.model_dump() if result.error else None,
+                        }
+                        await _hook_registry.run_post_tool_hooks(
+                            tool_name, result_dict, hook_ctx,
+                        )
+                        # Hooks may have mutated result_dict["data"] (e.g. AI tagging)
+                        if result_dict.get("data"):
+                            result.data = result_dict["data"]
+                    except Exception as hook_exc:
+                        logger.warning("Hook execution error: %s", hook_exc)
+
+                    step_results.append(result)
+                    all_tool_results.append(result)
+
+                    yield self._sse(
+                        "tool.result",
+                        {
+                            "tool_name": result.tool_name,
+                            "ok": result.ok,
+                            "data": result.data,
+                            "error": (
+                                result.error.model_dump() if result.error else None
+                            ),
+                        },
+                    )
+
+                # Synthesize intermediate results (non-last steps)
+                if not is_last and step_results:
+                    synthesis = await self._synthesize_step(
+                        step, step_results
+                    )
+                    if synthesis:
+                        accumulated_context.append(synthesis)
+
+                # Emit loop step complete
+                if len(steps) > 1:
+                    yield self._sse(
+                        "loop.step_complete",
+                        {"step": step.step_id, "total_steps": len(steps)},
+                    )
+
+            # ── Phase 3: Stream Final Answer ─────────────────────
             total_tokens = 0
             async for token in self._stream_answer(
                 user_message=request.user_message,
-                conversation_history=request.conversation_history,
+                conversation_history=compressed_history,
                 plan=plan,
-                tool_results=tool_results,
+                tool_results=all_tool_results,
+                accumulated_context=accumulated_context,
+                student_ctx=student_ctx,
+                diagnosis_prompt=diagnosis_prompt,
             ):
                 total_tokens += 1
                 yield self._sse("answer.delta", {"content": token})
@@ -175,15 +388,63 @@ class TutorOrchestrator:
                 "answer.completed", {"total_tokens": total_tokens},
             )
 
+            # ── Phase 4: Session Memory Extraction (Wave 2) ────
+            try:
+                all_msgs = compressed_history + [
+                    {"role": "user", "content": request.user_message},
+                ]
+                if _memory_extractor.should_extract(
+                    all_msgs,
+                    last_extraction_tokens=0,
+                ):
+                    memory = await _memory_extractor.extract(
+                        all_msgs,
+                        session_id=session_id,
+                        material_id=str(request.material_id),
+                    )
+                    if memory.covered_kps or memory.mastery_updates:
+                        await self._student_model.merge_session_memory(
+                            self._user_id,
+                            request.material_id,
+                            memory_to_dict(memory),
+                        )
+                        logger.info(
+                            "Session memory extracted: %d KPs, %d mastery updates",
+                            len(memory.covered_kps),
+                            len(memory.mastery_updates),
+                        )
+            except Exception as mem_exc:
+                logger.warning("Session memory extraction failed: %s", mem_exc)
+
             yield self._sse(
                 "session.completed", {"session_id": session_id},
             )
 
         except LLMError as e:
+            error_str = str(e)
             logger.exception("Tutor LLM error: %s", e)
+
+            if "rate limit" in error_str.lower() or "Rate limit" in error_str:
+                yield self._sse(
+                    "degraded",
+                    {
+                        "message": "AI 服务请求频率受限，请稍后重试",
+                        "reason": "rate_limit",
+                    },
+                )
+            elif "overload" in error_str.lower() or "529" in error_str:
+                yield self._sse(
+                    "degraded",
+                    {
+                        "message": "AI 服务繁忙，已尝试切换备用模型",
+                        "reason": "model_overload",
+                        "fallback_model": FALLBACK_CHAT_MODEL,
+                    },
+                )
+
             yield self._sse(
                 "error",
-                {"message": f"AI 服务暂时不可用: {str(e)[:200]}", "phase": "llm"},
+                {"message": f"AI 服务暂时不可用: {error_str[:200]}", "phase": "llm"},
             )
         except Exception as e:
             logger.exception("Tutor orchestrator error: %s", e)
@@ -197,10 +458,7 @@ class TutorOrchestrator:
     async def _build_context(
         self, material_id: uuid.UUID,
     ) -> list[str]:
-        """Determine which tools are available for this material.
-
-        If no completed analysis exists, return empty list (NO_ANALYSIS).
-        """
+        """Determine which tools are available for this material."""
         task = (
             await self._db.execute(
                 select(DisassemblyTask)
@@ -215,8 +473,7 @@ class TutorOrchestrator:
         ).scalar_one_or_none()
 
         if not task:
-            return []  # No tools available
-
+            return []
         return ["get_specialist", "get_quiz"]
 
     async def _plan(
@@ -227,7 +484,6 @@ class TutorOrchestrator:
     ) -> TutorPlanOutput:
         """Phase 1: Decide intent and tools via structured_output."""
         if not available_tools:
-            # No analysis available — force answer_direct
             return TutorPlanOutput(
                 intent="answer_direct",
                 reasoning="材料尚未分析，无可用工具，直接回答。",
@@ -242,10 +498,13 @@ class TutorOrchestrator:
 
         system = PLAN_SYSTEM.format(available_tools_desc=tools_desc)
 
-        # Only pass last 4 messages to plan model (lightweight, avoid token overflow)
-        recent_history = conversation_history[-4:] if len(conversation_history) > 4 else conversation_history
+        recent_history = (
+            conversation_history[-4:]
+            if len(conversation_history) > 4
+            else conversation_history
+        )
         messages = [
-            {"role": m.role, "content": m.content[:300]}  # Truncate long messages
+            {"role": m.role, "content": m.content[:300]}
             for m in recent_history
         ] + [
             {"role": "user", "content": user_message},
@@ -257,13 +516,12 @@ class TutorOrchestrator:
                 system=system,
                 messages=messages,
                 response_schema=TutorPlanOutput,
-                prompt_version="tutor_plan_v2",
+                prompt_version="tutor_plan_v3",
                 max_tokens=256,
                 max_retries=2,
             )
             plan: TutorPlanOutput = result.data
         except (LLMError, TypeError, Exception) as e:
-            # LLM plan failed — fallback to keyword-based intent detection
             logger.warning("Plan LLM failed (%s), using keyword fallback", e)
             plan = self._keyword_fallback_plan(user_message, available_tools)
 
@@ -272,18 +530,12 @@ class TutorOrchestrator:
             t for t in plan.tools_to_call if t in available_tools
         ]
 
-        # Safety net: if intent requires tools but none selected, auto-add
+        # Safety net
         if plan.intent == "explain" and "get_specialist" not in plan.tools_to_call:
             if "get_specialist" in available_tools:
-                logger.warning(
-                    "Plan intent=explain but missing get_specialist, auto-adding"
-                )
                 plan.tools_to_call.insert(0, "get_specialist")
         elif plan.intent == "quiz" and "get_quiz" not in plan.tools_to_call:
             if "get_quiz" in available_tools:
-                logger.warning(
-                    "Plan intent=quiz but missing get_quiz, auto-adding"
-                )
                 plan.tools_to_call.insert(0, "get_quiz")
 
         logger.info(
@@ -293,12 +545,93 @@ class TutorOrchestrator:
         return plan
 
     @staticmethod
+    def _to_steps(plan: TutorPlanOutput) -> list[TutorPlanStep]:
+        """Convert a flat plan into execution steps.
+
+        Most plans are single-step. Multi-tool plans with mixed intents
+        (explain + quiz) split into 2 steps for cleaner execution.
+        """
+        has_specialist = "get_specialist" in plan.tools_to_call
+        has_quiz = "get_quiz" in plan.tools_to_call
+
+        # Mixed intent: explain + quiz → 2 steps
+        if has_specialist and has_quiz:
+            return [
+                TutorPlanStep(
+                    step_id=1,
+                    intent="explain",
+                    tools_to_call=["get_specialist"],
+                    module_hint=plan.module_hint,
+                    description=f"讲解{plan.module_hint or '相关概念'}",
+                ),
+                TutorPlanStep(
+                    step_id=2,
+                    intent="quiz",
+                    tools_to_call=["get_quiz"],
+                    module_hint=plan.module_hint,
+                    description="生成测验题",
+                ),
+            ]
+
+        # Single-step plan
+        return [
+            TutorPlanStep(
+                step_id=1,
+                intent=plan.intent,
+                tools_to_call=plan.tools_to_call,
+                module_hint=plan.module_hint,
+                description=_intent_description(plan.intent, plan.module_hint),
+            ),
+        ]
+
+    async def _synthesize_step(
+        self,
+        step: TutorPlanStep,
+        results: list[TutorToolResult],
+    ) -> str | None:
+        """Synthesize tool results into compact context for next step."""
+        context_parts = []
+        for tr in results:
+            if tr.ok:
+                data_str = json.dumps(tr.data, ensure_ascii=False)
+                # Cap individual result for synthesis
+                if len(data_str) > 4000:
+                    data_str = data_str[:4000] + "..."
+                context_parts.append(f"[{tr.tool_name}]: {data_str}")
+
+        if not context_parts:
+            return None
+
+        context_text = "\n".join(context_parts)
+
+        try:
+            synthesis = await self._llm.non_streaming_chat(
+                model=PLAN_MODEL,
+                system=SYNTHESIS_SYSTEM,
+                messages=[{"role": "user", "content": context_text}],
+                max_tokens=512,
+                max_retries=1,
+            )
+            logger.info(
+                "Step %d synthesis: %d chars → %d chars",
+                step.step_id, len(context_text), len(synthesis),
+            )
+            return f"[步骤{step.step_id}摘要: {step.description}]\n{synthesis}"
+        except LLMError:
+            # Fallback: use first 500 chars of raw result
+            logger.warning("Synthesis LLM failed, using truncated raw context")
+            return context_text[:500]
+
+    @staticmethod
     def _keyword_fallback_plan(
         user_message: str, available_tools: list[str],
     ) -> TutorPlanOutput:
         """Simple keyword-based fallback when plan LLM fails."""
         msg = user_message.lower()
-        quiz_keywords = ["出题", "做题", "测验", "quiz", "考考", "测试", "学的怎么样"]
+        quiz_keywords = [
+            "出题", "做题", "测验", "quiz", "考考", "测试",
+            "学的怎么样", "道题", "几题", "出几道",
+        ]
         explain_keywords = [
             "讲讲", "解释", "什么是", "怎么", "为什么", "区别",
             "帮帮", "复习", "学习", "讲解", "概念", "原理",
@@ -311,7 +644,23 @@ class TutorOrchestrator:
                 reasoning="关键词匹配：问候/感谢（LLM plan fallback）",
             )
 
-        if any(k in msg for k in quiz_keywords):
+        # Check for compound: both explain + quiz
+        has_quiz = any(k in msg for k in quiz_keywords)
+        has_explain = any(k in msg for k in explain_keywords)
+
+        if has_quiz and has_explain:
+            tools = []
+            if "get_specialist" in available_tools:
+                tools.append("get_specialist")
+            if "get_quiz" in available_tools:
+                tools.append("get_quiz")
+            return TutorPlanOutput(
+                intent="explain",
+                reasoning="关键词匹配：复合请求讲解+出题（LLM plan fallback）",
+                tools_to_call=tools,
+            )
+
+        if has_quiz:
             tools = ["get_quiz"] if "get_quiz" in available_tools else []
             return TutorPlanOutput(
                 intent="quiz",
@@ -319,8 +668,12 @@ class TutorOrchestrator:
                 tools_to_call=tools,
             )
 
-        if any(k in msg for k in explain_keywords) or available_tools:
-            tools = ["get_specialist"] if "get_specialist" in available_tools else []
+        if has_explain or available_tools:
+            tools = (
+                ["get_specialist"]
+                if "get_specialist" in available_tools
+                else []
+            )
             return TutorPlanOutput(
                 intent="explain",
                 reasoning="关键词匹配/默认：讲解概念（LLM plan fallback）",
@@ -335,13 +688,24 @@ class TutorOrchestrator:
     async def _stream_answer(
         self,
         user_message: str,
-        conversation_history: list,
+        conversation_history: list[dict],
         plan: TutorPlanOutput,
         tool_results: list[TutorToolResult],
+        accumulated_context: list[str] | None = None,
+        student_ctx: StudentContext | None = None,
+        diagnosis_prompt: str = "",
     ) -> AsyncGenerator[str, None]:
-        """Phase 3: Stream final answer with tool results injected."""
-        # Build tool context for system prompt
+        """Phase 3: Stream final answer using layered prompt builder."""
+        # Build tool context
         tool_context_parts = []
+
+        # Include diagnosis prompt if needed (Wave 2)
+        if diagnosis_prompt:
+            tool_context_parts.append(diagnosis_prompt)
+
+        # Include accumulated context from previous steps
+        if accumulated_context:
+            tool_context_parts.extend(accumulated_context)
 
         if not tool_results:
             if plan.intent == "answer_direct":
@@ -372,20 +736,39 @@ class TutorOrchestrator:
                 + "\n\n…（工具结果过长，已截断）"
             )
 
-        system = ANSWER_SYSTEM.format(tool_context=tool_context)
+        # Determine tutor mode from plan intent
+        mode = TutorMode.LEARN_DEEP
+        if plan.intent == "quiz":
+            mode = TutorMode.EXAM_PREP
+        elif plan.intent == "answer_direct":
+            mode = TutorMode.QUICK_QA
 
-        messages = [
-            {"role": m.role, "content": m.content}
-            for m in conversation_history
-        ] + [
+        # Build layered prompt (Wave 2: inject student context)
+        prompt = _prompt_builder.build(
+            mode=mode,
+            tool_context=tool_context,
+            student_ctx=student_ctx,
+        )
+
+        logger.info(
+            "Prompt built: mode=%s, static_tokens≈%d, dynamic_tokens≈%d",
+            mode.value,
+            prompt.static_token_estimate,
+            prompt.dynamic_token_estimate,
+        )
+
+        # conversation_history is already a list of dicts (may be compressed)
+        messages = conversation_history + [
             {"role": "user", "content": user_message},
         ]
 
         async for token in self._llm.stream_text(
             model=CHAT_MODEL,
-            system=system,
+            system=prompt.full,
             messages=messages,
             max_tokens=2048,
+            max_retries=2,
+            fallback_model=FALLBACK_CHAT_MODEL,
         ):
             yield token
 
@@ -396,3 +779,13 @@ class TutorOrchestrator:
             "event": event,
             "data": json.dumps(data, ensure_ascii=False),
         }
+
+
+def _intent_description(intent: str, module_hint: str | None) -> str:
+    """Generate human-readable step description."""
+    hint = module_hint or "相关内容"
+    if intent == "explain":
+        return f"讲解{hint}"
+    if intent == "quiz":
+        return f"生成{hint}测验题"
+    return "直接回答"

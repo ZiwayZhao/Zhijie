@@ -62,6 +62,34 @@ class TutorPlanOutput(BaseModel):
     )
 
 
+# ── Multi-Step Plan (Wave 1 QueryLoop) ──────────────────────────
+
+class TutorPlanStep(BaseModel):
+    """One step in a multi-step plan."""
+    step_id: int = Field(description="Step number, 1-indexed")
+    intent: Literal["explain", "quiz", "answer_direct"]
+    tools_to_call: list[Literal["get_specialist", "get_quiz"]] = Field(
+        default_factory=list, max_length=2,
+    )
+    module_hint: str | None = None
+    description: str = Field(
+        default="",
+        description="What this step accomplishes, e.g. '讲解视图概念'",
+    )
+
+
+class TutorMultiStepPlan(BaseModel):
+    """Multi-step plan for complex queries. Max 3 steps."""
+    steps: list[TutorPlanStep] = Field(max_length=3)
+    reasoning: str = Field(
+        description="Overall reasoning for the plan",
+    )
+    is_multi_step: bool = Field(
+        default=False,
+        description="True if query requires more than 1 step",
+    )
+
+
 # ── Tool Result ──────────────────────────────────────────────────
 
 class TutorToolError(BaseModel):

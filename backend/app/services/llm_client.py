@@ -300,19 +300,206 @@ class LLMClient:
         system: str,
         messages: list[dict],
         max_tokens: int = 2048,
+        max_retries: int = 2,
+        fallback_model: str | None = None,
     ) -> AsyncGenerator[str, None]:
-        """Stream text from LLM (for Socratic dialogue)."""
+        """Stream text from LLM with retry and model fallback.
+
+        Retry strategy (inspired by Claude Code's withRetry):
+        - RateLimitError: exponential backoff, respect retry-after header
+        - APIStatusError (5xx): exponential backoff
+        - APIConnectionError: exponential backoff
+        - On final failure with fallback_model: try once with cheaper model
+
+        Args:
+            model: Primary model ID.
+            system: System prompt.
+            messages: Conversation messages.
+            max_tokens: Max output tokens.
+            max_retries: Retry attempts for transient errors.
+            fallback_model: If primary model fails, try this model once.
+
+        Yields:
+            Text tokens as they arrive.
+
+        Raises:
+            LLMError: After all retries and fallback exhausted.
+        """
         full_messages = [{"role": "system", "content": system}] + messages
-        stream = await self._client.chat.completions.create(
-            model=model,
-            messages=full_messages,
-            max_tokens=max_tokens,
-            stream=True,
+
+        current_model = model
+        last_error: Exception | None = None
+
+        for attempt in range(max_retries + 1):
+            try:
+                stream = await self._client.chat.completions.create(
+                    model=current_model,
+                    messages=full_messages,
+                    max_tokens=max_tokens,
+                    stream=True,
+                )
+                async for chunk in stream:
+                    delta = chunk.choices[0].delta if chunk.choices else None
+                    if delta and delta.content:
+                        yield delta.content
+                return  # Success — exit
+
+            except RateLimitError as e:
+                # Respect retry-after header if present
+                retry_after = None
+                if hasattr(e, 'response') and e.response is not None:
+                    retry_header = e.response.headers.get('retry-after')
+                    if retry_header:
+                        try:
+                            retry_after = int(retry_header)
+                        except ValueError:
+                            pass
+
+                wait = retry_after if retry_after else (2 ** attempt)
+                logger.warning(
+                    "stream_text rate limited (attempt %d/%d), waiting %ds",
+                    attempt + 1, max_retries + 1, wait,
+                )
+                last_error = e
+                if attempt < max_retries:
+                    await asyncio.sleep(wait)
+                    continue
+
+            except APIStatusError as e:
+                if e.status_code >= 500 and attempt < max_retries:
+                    wait = 2 ** attempt
+                    logger.warning(
+                        "stream_text API error %d (attempt %d/%d), retrying in %ds",
+                        e.status_code, attempt + 1, max_retries + 1, wait,
+                    )
+                    last_error = e
+                    await asyncio.sleep(wait)
+                    continue
+                last_error = e
+                break
+
+            except APIConnectionError as e:
+                if attempt < max_retries:
+                    wait = 2 ** attempt
+                    logger.warning(
+                        "stream_text connection error (attempt %d/%d), retrying in %ds",
+                        attempt + 1, max_retries + 1, wait,
+                    )
+                    last_error = e
+                    await asyncio.sleep(wait)
+                    continue
+                last_error = e
+                break
+
+        # All retries exhausted — try fallback model if configured
+        if fallback_model and fallback_model != current_model:
+            logger.warning(
+                "stream_text: primary model %s failed, falling back to %s",
+                model, fallback_model,
+            )
+            try:
+                stream = await self._client.chat.completions.create(
+                    model=fallback_model,
+                    messages=full_messages,
+                    max_tokens=max_tokens,
+                    stream=True,
+                )
+                async for chunk in stream:
+                    delta = chunk.choices[0].delta if chunk.choices else None
+                    if delta and delta.content:
+                        yield delta.content
+                return  # Fallback success
+            except Exception as fallback_err:
+                logger.error(
+                    "stream_text: fallback model %s also failed: %s",
+                    fallback_model, fallback_err,
+                )
+
+        raise LLMError(
+            f"stream_text failed after {max_retries + 1} attempts: {last_error}"
         )
-        async for chunk in stream:
-            delta = chunk.choices[0].delta if chunk.choices else None
-            if delta and delta.content:
-                yield delta.content
+
+    async def non_streaming_chat(
+        self,
+        *,
+        model: str,
+        system: str,
+        messages: list[dict],
+        max_tokens: int = 1024,
+        max_retries: int = 2,
+    ) -> str:
+        """Non-streaming text completion. Used for intermediate synthesis.
+
+        Simpler than structured_output (no function schema) and stream_text
+        (no streaming). Returns the full text at once.
+
+        Args:
+            model: Model ID.
+            system: System prompt.
+            messages: Conversation messages.
+            max_tokens: Max output tokens.
+            max_retries: Retry attempts for transient errors.
+
+        Returns:
+            Complete text response.
+
+        Raises:
+            LLMError: After all retries exhausted.
+        """
+        full_messages = [{"role": "system", "content": system}] + messages
+        last_error: Exception | None = None
+
+        for attempt in range(max_retries + 1):
+            try:
+                response = await self._client.chat.completions.create(
+                    model=model,
+                    messages=full_messages,
+                    max_tokens=max_tokens,
+                )
+                if not response.choices:
+                    raise LLMError("Empty response from LLM")
+
+                content = response.choices[0].message.content or ""
+                return content
+
+            except RateLimitError as e:
+                wait = 2 ** attempt
+                logger.warning(
+                    "non_streaming_chat rate limited (attempt %d/%d), waiting %ds",
+                    attempt + 1, max_retries + 1, wait,
+                )
+                last_error = e
+                if attempt < max_retries:
+                    await asyncio.sleep(wait)
+                    continue
+
+            except APIStatusError as e:
+                if e.status_code >= 500 and attempt < max_retries:
+                    wait = 2 ** attempt
+                    logger.warning(
+                        "non_streaming_chat API error %d (attempt %d/%d), retrying",
+                        e.status_code, attempt + 1, max_retries + 1,
+                    )
+                    last_error = e
+                    await asyncio.sleep(wait)
+                    continue
+                raise LLMError(f"API error {e.status_code}: {e.message}") from e
+
+            except APIConnectionError as e:
+                if attempt < max_retries:
+                    wait = 2 ** attempt
+                    logger.warning(
+                        "non_streaming_chat connection error (attempt %d/%d)",
+                        attempt + 1, max_retries + 1,
+                    )
+                    last_error = e
+                    await asyncio.sleep(wait)
+                    continue
+                raise LLMError(f"Connection error: {e}") from e
+
+        raise LLMError(
+            f"non_streaming_chat failed after {max_retries + 1} attempts: {last_error}"
+        )
 
 
 # Module-level convenience
