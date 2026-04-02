@@ -49,6 +49,7 @@ export default function TutorSidebar({
 
   const isBusy = !['idle', 'completed', 'error'].includes(state.phase)
   const statusText = PHASE_STATUS[state.phase]
+  const isError = state.phase === 'error'
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -264,6 +265,21 @@ export default function TutorSidebar({
             )}
           </button>
         </div>
+        {isError && (
+          <button
+            onClick={() => {
+              const lastUserMsg = state.messages.filter(m => m.role === 'user').at(-1)
+              if (lastUserMsg) {
+                setInput(lastUserMsg.content)
+                inputRef.current?.focus()
+              }
+            }}
+            className="w-full mt-1.5 py-1.5 text-xs text-red-primary border border-red-primary/30
+                       rounded-sm hover:bg-red-primary/5 transition-colors"
+          >
+            重新发送上一条消息
+          </button>
+        )}
         <p className="text-[10px] text-text-muted/50 mt-1.5 text-center">
           Enter 发送 · Shift+Enter 换行
         </p>
