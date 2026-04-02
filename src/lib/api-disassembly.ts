@@ -76,6 +76,7 @@ export interface AnalysisResult {
   task: DisassemblyTask
   modules: DisassemblyModule[]
   quiz: QuizResult | null
+  knowledge_cards: import('@/lib/types/knowledge-card').KnowledgeCardResult | null
 }
 
 /* ---------- Mock Data ---------- */
@@ -104,6 +105,7 @@ const MOCK_STEPS = [
   '正在解析文档结构...',
   '正在识别知识模块...',
   '正在分析考点权重...',
+  '正在生成知识卡片...',
   '正在建立模块关联...',
   '分析完成，生成报告中...',
 ]
@@ -231,8 +233,8 @@ function subscribeMockProgress(
   onProgress: (event: ProgressEvent) => void,
 ): () => void {
   let step = 0
-  const phases: ProgressEvent['phase'][] = ['parsing', 'cartographer', 'specialist', 'examiner', 'done']
-  const progressValues = [0.15, 0.35, 0.65, 0.90, 1.0]
+  const phases: ProgressEvent['phase'][] = ['parsing', 'cartographer', 'specialist', 'knowledge-cards', 'examiner', 'done']
+  const progressValues = [0.15, 0.35, 0.65, 0.82, 0.90, 1.0]
 
   const id = setInterval(() => {
     const progress = progressValues[step] ?? 1.0
@@ -262,6 +264,7 @@ export async function getAnalysisResult(taskId: string): Promise<AnalysisResult>
       },
       modules: MOCK_MODULES,
       quiz: MOCK_QUIZ,
+      knowledge_cards: null,
     }
   }
 
@@ -274,6 +277,7 @@ export async function getAnalysisResult(taskId: string): Promise<AnalysisResult>
       ...m, pages: `${m.page_range_start}-${m.page_range_end}`, examWeight: m.exam_weight,
     })),
     quiz: data.quiz,
+    knowledge_cards: data.knowledge_cards ?? null,
   }
 }
 
@@ -316,4 +320,26 @@ export async function cancelAnalysis(taskId: string): Promise<void> {
   if (USE_MOCK) return
   const res = await authFetch(`${AUTH_API}/disassembly/tasks/${taskId}/cancel`, { method: 'POST' })
   if (!res.ok) throw new Error('Cancel failed')
+}
+
+export async function getKnowledgeCards(taskId: string): Promise<import('@/lib/types/knowledge-card').KnowledgeCardResult> {
+  if (USE_MOCK) {
+    await new Promise((r) => setTimeout(r, 300))
+    return {
+      id: 'mock-cards-1',
+      task_id: taskId,
+      cards: [
+        { title: 'BFS 时间复杂度', card_type: 'formula', content_markdown: '$$O(V + E)$$\n\n其中 V 为顶点数，E 为边数。', symbols: [{ symbol: 'V', meaning: '顶点数' }, { symbol: 'E', meaning: '边数' }], related_modules: ['图的遍历算法'], difficulty_stars: 2 },
+        { title: 'BFS vs DFS', card_type: 'comparison', content_markdown: '| 特性 | BFS | DFS |\n|------|-----|-----|\n| 数据结构 | 队列 | 栈 |\n| 最短路径 | 是（无权图） | 否 |', symbols: null, related_modules: ['图的遍历算法'], difficulty_stars: 3 },
+      ],
+      formula_sheet: '## 图论公式汇总\n\n- BFS/DFS 时间: $O(V+E)$\n- Dijkstra: $O((V+E)\\log V)$',
+      error_taxonomy: '| 错误做法 | 正确做法 | 易混原因 |\n|---------|---------|--------|\n| 对负权图用 Dijkstra | 用 Bellman-Ford | 贪心假设不成立 |',
+      model_used: 'mock',
+      prompt_version: 'cards_v1',
+    }
+  }
+
+  const res = await authFetch(`${AUTH_API}/disassembly/tasks/${taskId}/knowledge-cards`)
+  if (!res.ok) throw new Error(`Knowledge cards fetch failed: ${res.status}`)
+  return res.json()
 }

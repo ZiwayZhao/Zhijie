@@ -118,9 +118,12 @@ class ExamProfile(BaseModel):
 
         # Map common course type strings to template keys
         type_lower = course_type.lower()
-        if any(k in type_lower for k in ("math", "physics", "engineer", "chem")):
+        if any(k in type_lower for k in ("math", "physics", "engineer", "chem", "physik")):
             key = "math"
-        elif any(k in type_lower for k in ("cs", "comput", "algo", "data", "program")):
+        elif any(k in type_lower for k in (
+            "cs", "comput", "algo", "data", "daten", "program",
+            "informatik", "数据", "计算", "算法", "编程", "database",
+        )):
             key = "cs"
         else:
             key = "humanities"

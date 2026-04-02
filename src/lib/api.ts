@@ -27,6 +27,7 @@ export {
   getSpecialistResult,
   getLatestAnalysis,
   cancelAnalysis,
+  getKnowledgeCards,
 } from '@/lib/api-disassembly'
 
 /* ---------- Course Types & API ---------- */
@@ -125,6 +126,25 @@ export async function fetchCourse(slug: string): Promise<CourseItem | null> {
   const res = await fetch(`${AUTH_API}/courses/${encodeURIComponent(slug)}`)
   if (res.status === 404) return null
   if (!res.ok) throw new Error(`Course fetch failed: ${res.status}`)
+  const data = await res.json()
+  return mapCourse(data)
+}
+
+export async function createCourse(opts: {
+  name: string
+  university?: string
+  language?: string
+  tags?: string[]
+}): Promise<CourseItem> {
+  const res = await authFetch(`${AUTH_API}/courses`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(opts),
+  })
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '')
+    throw new Error(`Course creation failed: ${res.status} ${detail}`)
+  }
   const data = await res.json()
   return mapCourse(data)
 }

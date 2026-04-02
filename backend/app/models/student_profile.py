@@ -34,9 +34,9 @@ class StudentProfile(Base):
          "avg_quiz_score": 0.65}
     """
 
-    __tablename__ = "student_profiles"
+    __tablename__ = "student_material_profiles"
     __table_args__ = (
-        UniqueConstraint("user_id", "material_id", name="uq_student_profile"),
+        UniqueConstraint("user_id", "material_id", name="uq_student_material_profile"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(

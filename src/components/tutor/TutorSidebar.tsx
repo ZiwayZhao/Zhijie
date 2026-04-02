@@ -3,15 +3,16 @@
  * Renders message history, streaming indicator, and input area.
  */
 
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Send, Loader2, RotateCcw, BookOpen } from 'lucide-react'
+import { Send, Loader2, RotateCcw, BookOpen, Compass } from 'lucide-react'
 import { useTutorSession } from '@/hooks/useTutorSession'
 import type { TutorPhase } from '@/hooks/useTutorSession'
 import TutorMessage from '@/components/tutor/TutorMessage'
 import { ToolProgress } from '@/components/tutor/ToolProgress'
 import { ContextBudgetBar } from '@/components/tutor/ContextBudgetBar'
 import type { MCQuestion } from '@/lib/api-disassembly'
+import { loadProfile } from '@/lib/student-model'
 
 /* ---------- Phase status text ---------- */
 
@@ -27,6 +28,8 @@ const PHASE_STATUS: Partial<Record<TutorPhase, string>> = {
 interface TutorSidebarProps {
   materialId: string
   moduleId?: string | null
+  moduleName?: string | null
+  courseId?: string
   /** IDs of exam/exercise materials to include as context for exam-aware answers */
   examMaterialIds?: string[]
   onSpecialistView?: (markdown: string, moduleName: string) => void
@@ -38,6 +41,8 @@ interface TutorSidebarProps {
 export default function TutorSidebar({
   materialId,
   moduleId,
+  moduleName,
+  courseId,
   examMaterialIds,
   onSpecialistView,
   onQuizView,
@@ -50,6 +55,40 @@ export default function TutorSidebar({
   const isBusy = !['idle', 'completed', 'error'].includes(state.phase)
   const statusText = PHASE_STATUS[state.phase]
   const isError = state.phase === 'error'
+
+  // Context-aware prompts based on current module and mastery
+  const contextPrompts = useMemo(() => {
+    const profile = loadProfile()
+    const modMastery = moduleId ? profile.modules[moduleId]?.mastery ?? 0 : 0
+    const masteryPct = Math.round(modMastery * 100)
+
+    if (moduleName) {
+      if (masteryPct < 30) {
+        return [
+          `从零开始教我「${moduleName}」的核心概念`,
+          `${moduleName}中最重要的知识点是什么？`,
+          `用通俗的例子解释${moduleName}`,
+        ]
+      }
+      if (masteryPct < 70) {
+        return [
+          `帮我深入理解「${moduleName}」中我还不懂的部分`,
+          `${moduleName}容易出错的考点有哪些？`,
+          `出几道${moduleName}的练习题测试我`,
+        ]
+      }
+      return [
+        `用高级题目挑战我对「${moduleName}」的掌握`,
+        `${moduleName}有哪些进阶延伸知识？`,
+        `帮我做一个${moduleName}的要点总结`,
+      ]
+    }
+    return [
+      '讲讲这个课件的核心概念',
+      '出几道测验题',
+      '帮我制定学习计划',
+    ]
+  }, [moduleId, moduleName])
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -153,29 +192,42 @@ export default function TutorSidebar({
             transition={{ delay: 0.1 }}
             className="text-center py-12 px-4"
           >
-            <p className="font-heading text-lg text-text-main mb-2">
-              有什么想了解的？
-            </p>
-            <p className="text-xs text-text-muted leading-relaxed">
-              试试问关于课件内容的问题，如：
-            </p>
-            <div className="mt-4 space-y-2">
-              {['讲讲这个课件的核心概念', '出几道测验题', 'NULL 是什么意思？'].map(
-                (hint, i) => (
-                  <button
-                    key={i}
-                    onClick={() => {
-                      setInput(hint)
-                      inputRef.current?.focus()
-                    }}
-                    className="block w-full text-left px-3 py-2 text-xs text-text-body
-                               border border-border-warm rounded-sm
-                               hover:border-red-primary hover:text-red-primary transition-colors"
-                  >
-                    {hint}
-                  </button>
-                ),
-              )}
+            {moduleName ? (
+              <>
+                <div className="w-8 h-8 rounded-full bg-red-primary/10 flex items-center justify-center mx-auto mb-3">
+                  <Compass size={16} strokeWidth={1.5} className="text-red-primary" />
+                </div>
+                <p className="font-heading text-base text-text-main mb-1">
+                  {moduleName}
+                </p>
+                <p className="text-xs text-text-muted leading-relaxed mb-4">
+                  选择学习方式，或输入你的问题
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="font-heading text-lg text-text-main mb-2">
+                  有什么想了解的？
+                </p>
+                <p className="text-xs text-text-muted leading-relaxed mb-4">
+                  试试问关于课件内容的问题：
+                </p>
+              </>
+            )}
+            <div className="space-y-2">
+              {contextPrompts.map((hint, i) => (
+                <button
+                  key={i}
+                  onClick={() => {
+                    sendMessage(hint)
+                  }}
+                  className="block w-full text-left px-3 py-2 text-xs text-text-body
+                             border border-border-warm rounded-sm
+                             hover:border-red-primary hover:text-red-primary transition-colors"
+                >
+                  {hint}
+                </button>
+              ))}
             </div>
           </motion.div>
         )}
@@ -222,6 +274,27 @@ export default function TutorSidebar({
           >
             <Loader2 size={12} className="animate-spin text-red-primary" />
             <span className="text-xs text-text-muted">{statusText}</span>
+          </motion.div>
+        )}
+
+        {/* Suggested follow-ups after tutor response */}
+        {state.messages.length > 0 && !isBusy && state.phase !== 'error' && (
+          <motion.div
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3 }}
+            className="flex flex-wrap gap-1.5 mb-3 pl-3"
+          >
+            {['继续深入讲解', '举个例子', '出道题考考我'].map((prompt) => (
+              <button
+                key={prompt}
+                onClick={() => sendMessage(prompt)}
+                className="px-2.5 py-1 text-[11px] text-text-muted border border-border-warm rounded-sm
+                           hover:border-red-primary hover:text-red-primary transition-colors"
+              >
+                {prompt}
+              </button>
+            ))}
           </motion.div>
         )}
 

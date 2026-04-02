@@ -15,7 +15,7 @@ from app.services.pdf_parser import ParsedPDF
 logger = logging.getLogger(__name__)
 
 PROMPT_VERSION = "cart_v1"
-MODEL = "anthropic/claude-sonnet-4.5"
+MODEL = "hunyuan-turbos"
 
 # ── Structured Output Schema ─────────────────────────────────────
 

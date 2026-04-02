@@ -1,12 +1,15 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { ArrowLeft, MessageCircle, Loader2, Wrench } from 'lucide-react'
 import { fetchCourse, fetchMaterial, type CourseItem, type MaterialItem } from '@/lib/api'
+import type { KnowledgeCardResult } from '@/lib/types/knowledge-card'
 import MaterialReader from '@/components/workbench/MaterialReader'
 import AIToolPanel from '@/components/workbench/AIToolPanel'
 import TutorSidebar from '@/components/tutor/TutorSidebar'
 import ErrorBoundary from '@/components/ErrorBoundary'
+import ToastContainer from '@/components/ui/ToastContainer'
+import { showToast } from '@/lib/toast-store'
 import { loadProfile } from '@/lib/student-model'
 import { loadExamProfile } from '@/lib/exam-profile'
 import type { ExamProfile } from '@/lib/exam-profile'
@@ -19,10 +22,14 @@ export default function WorkbenchPage() {
   const [course, setCourse] = useState<CourseItem | null>(null)
   const [loading, setLoading] = useState(true)
   const [specialistMarkdown, setSpecialistMarkdown] = useState<string | null>(null)
+  const [keyConcepts, setKeyConcepts] = useState<string[]>([])
+  const [examTraps, setExamTraps] = useState<string[]>([])
   const [quizQuestions, setQuizQuestions] = useState<MCQuestion[]>([])
+  const [quizModuleFilter, setQuizModuleFilter] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState('original')
   const [currentModuleId, setCurrentModuleId] = useState<string | null>(null)
   const [currentModuleName, setCurrentModuleName] = useState<string | null>(null)
+  const [knowledgeCards, setKnowledgeCards] = useState<KnowledgeCardResult | null>(null)
   const [sidebarTab, setSidebarTab] = useState<'tools' | 'tutor'>('tutor')
   const [examProfile, setExamProfile] = useState<ExamProfile | null>(null)
 
@@ -49,8 +56,16 @@ export default function WorkbenchPage() {
     }
   }, [courseId])
 
-  const handleModuleSelect = useCallback((moduleId: string, moduleName: string, markdown: string) => {
+  const handleModuleSelect = useCallback((
+    moduleId: string,
+    moduleName: string,
+    markdown: string,
+    concepts?: string[],
+    traps?: string[],
+  ) => {
     setSpecialistMarkdown(markdown)
+    setKeyConcepts(concepts ?? [])
+    setExamTraps(traps ?? [])
     setActiveTab('specialist')
     setCurrentModuleId(moduleId)
     setCurrentModuleName(moduleName)
@@ -58,7 +73,86 @@ export default function WorkbenchPage() {
 
   const handleQuizReady = useCallback((questions: MCQuestion[]) => {
     setQuizQuestions(questions)
+    if (questions.length > 0) {
+      showToast(`测验已生成（${questions.length} 题），切换到自测验标签查看`)
+    }
   }, [])
+
+  const handleKnowledgeCardsReady = useCallback((data: KnowledgeCardResult) => {
+    setKnowledgeCards(data)
+  }, [])
+
+  // Switch sidebar to Tutor tab (triggered by qa tool click)
+  const handleSwitchToTutor = useCallback((context?: string) => {
+    setSidebarTab('tutor')
+    if (context) {
+      showToast(`已切换到 AI 助教 — ${context}`)
+    }
+  }, [])
+
+  // Generate flashcards from current specialist content
+  const handleGenerateFlashcards = useCallback(() => {
+    if (!specialistMarkdown || !currentModuleName) {
+      showToast('请先选择一个模块查看 AI 精讲')
+      return
+    }
+
+    const concepts = keyConcepts.length > 0 ? keyConcepts : []
+    const traps = examTraps.length > 0 ? examTraps : []
+    const allItems = [...concepts, ...traps]
+
+    if (allItems.length === 0) {
+      showToast('当前模块没有可提取的知识点')
+      return
+    }
+
+    const cards = allItems.map((item, _i) => ({
+      id: crypto.randomUUID(),
+      type: 'basic' as const,
+      fields: {
+        front: item,
+        back: '(复习精讲内容)',
+        extra: '',
+      },
+      tags: [courseId || 'unknown', currentModuleName],
+      sourceRef: {
+        materialId: material?.id || '',
+        moduleId: currentModuleId || '',
+      },
+      createdAt: Date.now(),
+      generatedBy: 'ai' as const,
+    }))
+
+    const deckKey = `zhijie_flashcards_${courseId || 'default'}`
+    try {
+      const existing = JSON.parse(localStorage.getItem(deckKey) || '[]')
+      localStorage.setItem(deckKey, JSON.stringify([...existing, ...cards]))
+    } catch {
+      // localStorage quota exceeded
+      showToast('闪卡保存失败：存储空间不足')
+      return
+    }
+
+    showToast(`已生成 ${cards.length} 张闪卡`)
+  }, [specialistMarkdown, currentModuleName, keyConcepts, examTraps, courseId, material?.id, currentModuleId])
+
+  // Handle module quiz from manual tool (filter questions and switch to quiz tab)
+  const handleModuleQuizFromTool = useCallback((_moduleId: string, moduleName: string) => {
+    const count = quizQuestions.filter((q) => q.source_module_name === moduleName).length
+    if (count > 0) {
+      setQuizModuleFilter(moduleName)
+      setActiveTab('quiz')
+      showToast(`已筛选 ${count} 道「${moduleName}」测验题`)
+    } else {
+      showToast('当前模块暂无测验题，请先完成课件分析')
+    }
+  }, [quizQuestions])
+
+  // Filter quiz questions by module when a filter is active, without losing the full set
+  const displayedQuizQuestions = useMemo(() => {
+    if (!quizModuleFilter) return quizQuestions
+    return quizQuestions.filter((q) => q.source_module_name === quizModuleFilter)
+  }, [quizQuestions, quizModuleFilter])
 
   if (loading) {
     return (
@@ -94,7 +188,7 @@ export default function WorkbenchPage() {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.35 }}
-        className="flex-[7] min-w-0 p-6 lg:py-10 lg:px-12 overflow-y-auto"
+        className="flex-[7] min-w-0 p-6 lg:py-10 lg:px-12 overflow-y-auto print:flex-[1] print:p-0"
       >
         {/* Breadcrumb — editorial navigation */}
         <nav className="flex items-center gap-1.5 text-xs text-text-muted mb-8">
@@ -119,12 +213,19 @@ export default function WorkbenchPage() {
         <ErrorBoundary>
           <MaterialReader
             material={material}
+            courseId={courseId}
             courseName={course?.name}
             courseSchool={course?.school}
             specialistMarkdown={specialistMarkdown}
-            quizQuestions={quizQuestions}
+            keyConcepts={keyConcepts}
+            examTraps={examTraps}
+            knowledgeCards={knowledgeCards}
+            quizQuestions={displayedQuizQuestions}
+            quizModuleFilter={quizModuleFilter}
+            onClearQuizFilter={() => setQuizModuleFilter(null)}
             activeTab={activeTab}
             onTabChange={setActiveTab}
+            onGenerateFlashcards={handleGenerateFlashcards}
           />
         </ErrorBoundary>
 
@@ -167,7 +268,7 @@ export default function WorkbenchPage() {
         className="flex-[3] lg:min-w-[400px] border-l border-border-warm bg-bg-card
                    lg:sticky lg:top-0 lg:h-screen
                    max-lg:border-t max-lg:border-l-0
-                   flex flex-col"
+                   flex flex-col print:hidden"
       >
         {/* Sidebar tab bar */}
         <div className="flex border-b border-border-warm px-5 pt-4 lg:px-6 lg:pt-5 shrink-0">
@@ -195,24 +296,51 @@ export default function WorkbenchPage() {
           </button>
         </div>
 
-        {/* Tab content — visibility-based toggle preserves state + Framer Motion animations */}
+        {/* Tab content — visibility-based toggle preserves state.
+             The active panel gets z-20 to sit clearly above the hidden one (z-0).
+             Hidden panel uses pointer-events-none + visibility-hidden after opacity
+             transition to ensure no ghost click interception. */}
         <div className="flex-1 min-h-0 relative">
-          <div className={`absolute inset-0 overflow-y-auto p-5 lg:p-6 transition-opacity duration-150 ${sidebarTab === 'tools' ? 'opacity-100 z-10' : 'opacity-0 pointer-events-none z-0'}`}>
+          <div
+            className={`absolute inset-0 overflow-y-auto p-5 lg:p-6 transition-opacity duration-150 ${
+              sidebarTab === 'tools'
+                ? 'opacity-100 z-20'
+                : 'opacity-0 pointer-events-none z-0 invisible'
+            }`}
+          >
             <ErrorBoundary>
               <AIToolPanel
                 materialId={material.id}
                 courseId={courseId}
                 courseName={course?.name}
+                specialistMarkdown={specialistMarkdown}
+                currentModuleName={currentModuleName}
+                quizQuestions={quizQuestions}
                 onModuleSelect={handleModuleSelect}
                 onQuizReady={handleQuizReady}
+                onKnowledgeCardsReady={handleKnowledgeCardsReady}
+                onModuleQuiz={(_modId, modName) => {
+                  setQuizModuleFilter(modName)
+                  setActiveTab('quiz')
+                }}
+                onSwitchToTutor={handleSwitchToTutor}
+                onGenerateFlashcards={handleGenerateFlashcards}
               />
             </ErrorBoundary>
           </div>
-          <div className={`absolute inset-0 overflow-y-auto p-5 lg:p-6 h-full transition-opacity duration-150 ${sidebarTab === 'tutor' ? 'opacity-100 z-10' : 'opacity-0 pointer-events-none z-0'}`}>
+          <div
+            className={`absolute inset-0 overflow-y-auto p-5 lg:p-6 transition-opacity duration-150 ${
+              sidebarTab === 'tutor'
+                ? 'opacity-100 z-20'
+                : 'opacity-0 pointer-events-none z-0 invisible'
+            }`}
+          >
             <ErrorBoundary>
               <TutorSidebar
                 materialId={material.id}
                 moduleId={currentModuleId}
+                moduleName={currentModuleName}
+                courseId={courseId}
                 onSpecialistView={(markdown, moduleName) => {
                   setSpecialistMarkdown(markdown)
                   setCurrentModuleName(moduleName)
@@ -227,6 +355,8 @@ export default function WorkbenchPage() {
           </div>
         </div>
       </motion.aside>
+
+      <ToastContainer />
     </div>
   )
 }

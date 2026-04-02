@@ -9,11 +9,13 @@ import { motion, type Variants } from 'framer-motion'
 import { Clock, Flame, BookOpen, FileCheck, ArrowRight, Layers, HelpCircle } from 'lucide-react'
 import { fetchCourses, fetchShowcase, type CourseItem, type ShowcaseItem } from '@/lib/api'
 import type { DailyAgenda, TodoItem, ExamConfig } from '@/lib/agenda-engine'
-import { generateDailyAgenda, loadExamConfigs, loadTodos, saveTodos } from '@/lib/agenda-engine'
+import { generateDailyAgenda, loadExamConfigs, loadTodos, saveTodos, getExamWeakModuleItems } from '@/lib/agenda-engine'
 import { loadAllDecks } from '@/lib/fsrs'
 import { loadProfile } from '@/lib/student-model'
+import { loadExamProfile } from '@/lib/exam-profile'
 import DailyPlan from '@/components/agenda/DailyPlan'
 import ExamCountdown from '@/components/agenda/ExamCountdown'
+import QuickExamSetup from '@/components/agenda/QuickExamSetup'
 import { differenceInDays } from 'date-fns'
 import { useAuth } from '@/contexts/AuthContext'
 
@@ -116,8 +118,15 @@ function AuthenticatedHomePage() {
   const rebuildAgenda = useCallback((currentTodos: TodoItem[]) => {
     const decks = loadAllDecks()
     const configs = loadExamConfigs()
-    // No mock study items — real data only (empty until user has analyzed materials)
-    const daily = generateDailyAgenda(decks, configs, [], currentTodos)
+    const profile = loadProfile()
+
+    // Collect weak-module study items from all exam-configured courses
+    const studyItems = configs.flatMap((c) => {
+      const examProfile = loadExamProfile(c.courseId)
+      return getExamWeakModuleItems(profile, c.courseId, c.courseName, examProfile)
+    })
+
+    const daily = generateDailyAgenda(decks, configs, studyItems, currentTodos)
     setAgenda(daily)
     setExamConfigs(configs)
   }, [])
@@ -152,7 +161,7 @@ function AuthenticatedHomePage() {
 
   const upcomingExams = examConfigs.filter((c) => {
     const days = differenceInDays(new Date(c.examDate), new Date())
-    return days >= 0 && days <= 7
+    return days >= 0 && days <= 14
   })
 
   return (
@@ -170,6 +179,12 @@ function AuthenticatedHomePage() {
           {upcomingExams.map((config) => (
             <ExamCountdown key={config.courseId} examConfig={config} />
           ))}
+        </motion.div>
+      )}
+
+      {examConfigs.length === 0 && (
+        <motion.div initial="hidden" animate="visible" variants={fadeUp} custom={2}>
+          <QuickExamSetup onExamSet={() => rebuildAgenda(todosRef.current)} />
         </motion.div>
       )}
 

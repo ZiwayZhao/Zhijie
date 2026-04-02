@@ -14,6 +14,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.schemas.knowledge_card import KnowledgeCardResponse
+
 
 # ── Business Error Codes ──────────────────────────────────────────
 
@@ -59,7 +61,7 @@ class TaskStatusResponse(BaseModel):
     task_id: uuid.UUID = Field(alias="id", serialization_alias="task_id")
     material_id: uuid.UUID
     status: str = Field(description="pending | running | completed | failed | cancelled")
-    phase: str = Field(description="init | parsing | cartographer | specialist | examiner | done")
+    phase: str = Field(description="init | parsing | cartographer | specialist | knowledge-cards | examiner | done")
     progress: float = Field(ge=0.0, le=1.0)
     attempt: int = 1
     error_message: str | None = None
@@ -205,6 +207,7 @@ class DisassemblyResultResponse(BaseModel):
     task: TaskStatusResponse
     modules: list[ModuleSummary]
     quiz: QuizResponse | None = None
+    knowledge_cards: KnowledgeCardResponse | None = None
 
 
 # Forward ref resolution

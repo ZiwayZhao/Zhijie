@@ -80,12 +80,20 @@ _client: AsyncOpenAI | None = None
 
 
 def get_openai_client() -> AsyncOpenAI:
-    """Lazy singleton AsyncOpenAI client configured for OpenRouter."""
+    """Lazy singleton AsyncOpenAI client — uses LLM_BASE_URL if set, else OpenRouter."""
     global _client
     if _client is None:
+        if settings.llm_base_url and settings.llm_api_key:
+            api_key = settings.llm_api_key
+            base_url = settings.llm_base_url
+            logger.info("Using custom LLM endpoint: %s", base_url)
+        else:
+            api_key = settings.openrouter_api_key
+            base_url = "https://openrouter.ai/api/v1"
+            logger.info("Using OpenRouter endpoint")
         _client = AsyncOpenAI(
-            api_key=settings.openrouter_api_key,
-            base_url="https://openrouter.ai/api/v1",
+            api_key=api_key,
+            base_url=base_url,
             max_retries=0,  # We handle retries ourselves
         )
     return _client
@@ -111,8 +119,21 @@ class LLMError(Exception):
 class LLMClient:
     """High-level LLM client with retry, structured output, and tracking."""
 
-    def __init__(self):
-        self._client = get_openai_client()
+    def __init__(self, *, custom_base_url: str | None = None, custom_api_key: str | None = None):
+        if custom_base_url and custom_api_key:
+            # Per-user custom LLM endpoint — NOT the singleton
+            self._client = AsyncOpenAI(
+                api_key=custom_api_key,
+                base_url=custom_base_url,
+                max_retries=0,
+            )
+            self._is_custom = True
+            self._custom_base_url = custom_base_url
+            logger.info("LLMClient using custom endpoint: %s", custom_base_url)
+        else:
+            self._client = get_openai_client()
+            self._is_custom = False
+            self._custom_base_url = settings.llm_base_url
 
     async def structured_output(
         self,
@@ -128,11 +149,11 @@ class LLMClient:
     ) -> LLMResult:
         """Call LLM with function calling → Pydantic model.
 
-        Uses OpenAI-compatible function calling to get structured JSON,
-        then validates with Pydantic as a second layer.
+        Strategy: try function calling first; if model doesn't support
+        tool_choice (404), automatically fall back to JSON-in-prompt mode.
 
         Args:
-            model: Model ID (OpenRouter format, e.g. "anthropic/claude-sonnet-4.5").
+            model: Model ID (OpenRouter format).
             system: System prompt.
             messages: Conversation messages.
             response_schema: Pydantic model class for the response.
@@ -150,6 +171,150 @@ class LLMClient:
         if run_id is None:
             run_id = uuid.uuid4().hex
 
+        try:
+            return await self._structured_output_function_calling(
+                model=model, system=system, messages=messages,
+                response_schema=response_schema, prompt_version=prompt_version,
+                max_tokens=max_tokens, run_id=run_id, max_retries=max_retries,
+            )
+        except LLMError as e:
+            err_str = str(e).lower()
+            # Fallback to JSON prompt mode when function calling isn't working:
+            # - 404 + tool_choice: provider doesn't support tool_choice param
+            # - "no function call named": model returned text instead of tool_call
+            should_fallback = (
+                ("404" in err_str and "tool_choice" in err_str)
+                or "no function call named" in err_str
+            )
+            if should_fallback:
+                logger.info(
+                    "Model %s function calling failed (%s), falling back to JSON prompt mode",
+                    model, str(e)[:100],
+                )
+                return await self._structured_output_json_prompt(
+                    model=model, system=system, messages=messages,
+                    response_schema=response_schema, prompt_version=prompt_version,
+                    max_tokens=max_tokens, run_id=run_id, max_retries=max_retries,
+                )
+            raise
+
+    async def _structured_output_json_prompt(
+        self,
+        *,
+        model: str,
+        system: str,
+        messages: list[dict],
+        response_schema: type[T],
+        prompt_version: str,
+        max_tokens: int = 4096,
+        run_id: str,
+        max_retries: int = 3,
+    ) -> LLMResult:
+        """Fallback: instruct LLM to return JSON matching schema in the text response."""
+        from pydantic import ValidationError
+
+        schema_name = response_schema.__name__
+        raw_schema = response_schema.model_json_schema()
+        resolved = _resolve_refs(raw_schema)
+        resolved.pop("title", None)
+        resolved.pop("description", None)
+        schema_str = json.dumps(resolved, ensure_ascii=False, indent=2)
+
+        json_system = (
+            f"{system}\n\n"
+            f"你必须以纯 JSON 格式回复，严格符合以下 JSON Schema：\n"
+            f"```json\n{schema_str}\n```\n"
+            f"不要输出任何其他内容，只输出一个合法的 JSON 对象。不要用 markdown 代码块包裹。"
+        )
+
+        last_error = None
+        for attempt in range(max_retries + 1):
+            try:
+                start = time.monotonic()
+                full_msgs = [{"role": "system", "content": json_system}] + messages
+                response = await self._client.chat.completions.create(
+                    model=model,
+                    messages=full_msgs,
+                    max_tokens=max_tokens,
+                )
+                elapsed_ms = int((time.monotonic() - start) * 1000)
+
+                if not response.choices:
+                    raise LLMError("LLM returned empty choices")
+
+                content = response.choices[0].message.content or ""
+                logger.info("JSON prompt response preview: %s", content[:300])
+
+                # Strip markdown code fences if present
+                text = content.strip()
+                if text.startswith("```"):
+                    # Remove first line (```json) and last line (```)
+                    lines = text.split("\n")
+                    lines = [l for l in lines if not l.strip().startswith("```")]
+                    text = "\n".join(lines)
+
+                raw_args = json.loads(text)
+                raw_args = _fix_double_serialized(raw_args)
+                parsed = response_schema.model_validate(raw_args)
+
+                usage = response.usage or type("Usage", (), {"prompt_tokens": 0, "completion_tokens": 0})()
+                return LLMResult(
+                    data=parsed,
+                    input_tokens=getattr(usage, "prompt_tokens", 0),
+                    output_tokens=getattr(usage, "completion_tokens", 0),
+                    latency_ms=elapsed_ms,
+                    model=model,
+                    run_id=run_id,
+                    prompt_version=prompt_version,
+                )
+
+            except (ValidationError, json.JSONDecodeError) as e:
+                if attempt < max_retries:
+                    logger.warning(
+                        "JSON prompt validation failed (attempt %d/%d): %s",
+                        attempt + 1, max_retries + 1, str(e)[:300],
+                    )
+                    last_error = LLMError(f"Validation error: {e}")
+                    await asyncio.sleep(1)
+                    continue
+                raise LLMError(f"JSON prompt validation failed after retries: {e}") from e
+
+            except RateLimitError:
+                wait = 2 ** attempt
+                logger.warning("Rate limited (attempt %d/%d), waiting %ds", attempt + 1, max_retries + 1, wait)
+                await asyncio.sleep(wait)
+                last_error = LLMError("Rate limit exceeded")
+
+            except APIStatusError as e:
+                if e.status_code >= 500 and attempt < max_retries:
+                    wait = 2 ** attempt
+                    await asyncio.sleep(wait)
+                    last_error = LLMError(f"API error {e.status_code}: {e.message}")
+                else:
+                    raise LLMError(f"API error {e.status_code}: {e.message}") from e
+
+            except APIConnectionError as e:
+                if attempt < max_retries:
+                    await asyncio.sleep(2 ** attempt)
+                    last_error = LLMError(f"Connection error: {e}")
+                else:
+                    raise LLMError(f"Connection error: {e}") from e
+
+        raise last_error or LLMError("Unknown error after retries")
+
+    async def _structured_output_function_calling(
+        self,
+        *,
+        model: str,
+        system: str,
+        messages: list[dict],
+        response_schema: type[T],
+        prompt_version: str,
+        max_tokens: int = 4096,
+        run_id: str,
+        max_retries: int = 3,
+    ) -> LLMResult:
+        """Primary path: use OpenAI-compatible function calling with tool_choice."""
         # Build function definition from Pydantic schema
         schema_name = response_schema.__name__
         raw_schema = response_schema.model_json_schema()
@@ -176,13 +341,20 @@ class LLMClient:
             try:
                 start = time.monotonic()
                 full_msgs = [{"role": "system", "content": system}] + retry_messages
-                response = await self._client.chat.completions.create(
+                # Some providers (e.g. Tencent CodingPlan) reject tool_choice
+                create_kwargs: dict = dict(
                     model=model,
                     messages=full_msgs,
                     tools=[func_def],
-                    tool_choice={"type": "function", "function": {"name": schema_name}},
                     max_tokens=max_tokens,
                 )
+                base_url = self._custom_base_url or settings.llm_base_url or ""
+                if not base_url or "openrouter" in base_url:
+                    create_kwargs["tool_choice"] = {
+                        "type": "function",
+                        "function": {"name": schema_name},
+                    }
+                response = await self._client.chat.completions.create(**create_kwargs)
                 elapsed_ms = int((time.monotonic() - start) * 1000)
 
                 # Extract function call from response
@@ -512,3 +684,40 @@ def get_llm_client() -> LLMClient:
     if _llm_client is None:
         _llm_client = LLMClient()
     return _llm_client
+
+
+async def get_llm_client_for_user(user_id) -> tuple[LLMClient, str | None]:
+    """Return an LLMClient configured with the user's custom API key if set.
+
+    Returns (client, preferred_model) tuple.
+    If user has no custom settings, returns the system singleton + None.
+    """
+    from sqlalchemy import select
+    from app.db.session import async_session_factory
+    from app.models.user_llm_settings import UserLLMSettings
+    from app.core.encryption import decrypt_api_key
+
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(UserLLMSettings).where(UserLLMSettings.user_id == user_id)
+        )
+        user_settings = result.scalar_one_or_none()
+
+    if not user_settings or user_settings.llm_provider == "system":
+        return get_llm_client(), None
+
+    if not user_settings.llm_api_key_encrypted:
+        return get_llm_client(), user_settings.llm_model
+
+    try:
+        api_key = decrypt_api_key(user_settings.llm_api_key_encrypted)
+    except Exception:
+        logger.warning("Failed to decrypt API key for user %s, using system default", user_id)
+        return get_llm_client(), None
+
+    base_url = user_settings.llm_base_url
+    if not base_url:
+        # Shouldn't happen if provider preset was applied, but fallback
+        return get_llm_client(), user_settings.llm_model
+
+    return LLMClient(custom_base_url=base_url, custom_api_key=api_key), user_settings.llm_model

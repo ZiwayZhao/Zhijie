@@ -1,16 +1,20 @@
-"""Course & category browsing API — public (no JWT required)."""
+"""Course & category browsing API — public reads, authenticated creation."""
 
+import re
+import uuid as uuid_mod
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.security import get_current_user
 from app.db.session import get_db
 from app.models.course import Course, CourseCategory, CourseMaterialSource
 from app.schemas.course import (
     CategoryListResponse,
     CategoryResponse,
+    CourseCreateRequest,
     CourseListResponse,
     CourseMaterialSourceResponse,
     CourseResponse,
@@ -105,6 +109,66 @@ async def list_courses(
     return CourseListResponse(
         items=items, total=total, page=page, page_size=page_size
     )
+
+
+def _slugify(name: str) -> str:
+    """Generate a URL-safe slug from a course name."""
+    s = name.lower().strip()
+    s = re.sub(r"[^\w\s-]", "", s)
+    s = re.sub(r"[\s_]+", "-", s)
+    s = re.sub(r"-+", "-", s).strip("-")
+    return s or "course"
+
+
+@router.post("", response_model=CourseResponse, status_code=201)
+async def create_course(
+    body: CourseCreateRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Create a user-defined course. Assigns to 'Other' category if none exists."""
+    # Find or create a default category for user-created courses
+    cat_stmt = select(CourseCategory).where(CourseCategory.slug == "other")
+    cat_result = await db.execute(cat_stmt)
+    category = cat_result.scalar_one_or_none()
+    if category is None:
+        category = CourseCategory(
+            name="Other", slug="other", sort_order=999
+        )
+        db.add(category)
+        await db.flush()
+
+    # Generate unique slug
+    base_slug = _slugify(body.name)
+    slug = base_slug
+    suffix = 0
+    while True:
+        exists = (await db.execute(
+            select(Course.id).where(Course.slug == slug)
+        )).scalar_one_or_none()
+        if exists is None:
+            break
+        suffix += 1
+        slug = f"{base_slug}-{suffix}"
+
+    course = Course(
+        category_id=category.id,
+        name=body.name,
+        slug=slug,
+        university=body.university,
+        language=body.language,
+        tags=body.tags or [],
+        source_platform="manual",
+        content_status="raw",
+    )
+    db.add(course)
+    await db.commit()
+    await db.refresh(course)
+
+    resp = CourseResponse.model_validate(course)
+    resp.category_name = category.name
+    resp.category_slug = category.slug
+    return resp
 
 
 @router.get("/categories", response_model=CategoryListResponse)

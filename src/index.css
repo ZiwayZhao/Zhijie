@@ -81,3 +81,25 @@ body {
 .quiz-math .katex {
   font-size: 1em;
 }
+
+/* Print styles — export specialist/quiz content cleanly */
+@media print {
+  /* Hide app chrome */
+  nav, aside, header,
+  [data-sidebar], [data-header],
+  .print\:hidden { display: none !important; }
+
+  /* Reset background & borders for clean printing */
+  html, body { background: white !important; color: #1A1A1A !important; }
+  article { border: none !important; box-shadow: none !important; }
+
+  /* Readable typography */
+  .prose-academic { font-size: 12pt; line-height: 1.6; }
+  .prose-academic h1 { font-size: 18pt; page-break-after: avoid; }
+  .prose-academic h2 { font-size: 15pt; page-break-after: avoid; }
+  .prose-academic h3 { font-size: 13pt; page-break-after: avoid; }
+  .prose-academic table { page-break-inside: avoid; }
+
+  /* Quiz: show all questions with answers for review */
+  .quiz-panel { page-break-inside: avoid; }
+}

@@ -1,9 +1,11 @@
-import { useState, lazy, Suspense } from 'react'
+import { useState, lazy, Suspense, useCallback } from 'react'
 import { motion } from 'framer-motion'
-import { FileText, Calendar, BookOpen, Loader2 } from 'lucide-react'
+import { FileText, Calendar, BookOpen, Loader2, Printer } from 'lucide-react'
 
 const PdfAnnotator = lazy(() => import('./PdfAnnotator'))
 const PerPageViewer = lazy(() => import('./PerPageViewer'))
+const KnowledgeCardsTab = lazy(() => import('./KnowledgeCardsTab'))
+const FormulaSheetTab = lazy(() => import('./FormulaSheetTab'))
 import ErrorBoundary from '@/components/ErrorBoundary'
 import ReactMarkdown from 'react-markdown'
 import remarkMath from 'remark-math'
@@ -11,18 +13,26 @@ import remarkGfm from 'remark-gfm'
 import rehypeKatex from 'rehype-katex'
 import type { MaterialItem, MCQuestion } from '@/lib/api'
 import type { QuestionItem } from '@/lib/types/question'
+import type { KnowledgeCardResult } from '@/lib/types/knowledge-card'
 import QuizPanel from '@/components/workbench/QuizPanel'
 import QuizPanelV2 from '@/components/quiz/QuizPanelV2'
+import { useQuizSession } from '@/hooks/useQuizSession'
 
 /* ---------- Types ---------- */
 
 interface MaterialReaderProps {
   material: MaterialItem
+  courseId?: string
   courseName?: string
   courseSchool?: string
   specialistMarkdown?: string | null
+  keyConcepts?: string[]
+  examTraps?: string[]
   perPageMarkdown?: string | null
+  knowledgeCards?: KnowledgeCardResult | null
   quizQuestions?: MCQuestion[]
+  quizModuleFilter?: string | null
+  onClearQuizFilter?: () => void
   activeTab?: string
   onTabChange?: (tab: string) => void
   onGenerateFlashcards?: () => void
@@ -61,11 +71,17 @@ function hasV2Questions(questions: MCQuestion[]): boolean {
 
 export default function MaterialReader({
   material,
+  courseId,
   courseName,
   courseSchool,
   specialistMarkdown,
+  keyConcepts = [],
+  examTraps = [],
   perPageMarkdown,
+  knowledgeCards,
   quizQuestions,
+  quizModuleFilter,
+  onClearQuizFilter,
   activeTab: controlledTab,
   onTabChange,
   onGenerateFlashcards,
@@ -73,6 +89,9 @@ export default function MaterialReader({
   const [internalTab, setInternalTab] = useState('original')
   const activeTab = controlledTab ?? internalTab
   const setActiveTab = onTabChange ?? setInternalTab
+
+  // Mastery feedback loop: quiz answers → BKT → student model
+  const { handleQuizComplete } = useQuizSession(courseId || material.id)
 
   const courseInfo = (courseName || courseSchool)
     ? { name: courseName || '', school: courseSchool || '' }
@@ -82,39 +101,111 @@ export default function MaterialReader({
 
   const hasQuiz = !!quizQuestions && quizQuestions.length > 0
   const hasPerPage = !!perPageMarkdown && perPageMarkdown.length > 0
+  const hasKnowledgeCards = !!knowledgeCards && knowledgeCards.cards.length > 0
+  const hasFormulaSheet = !!knowledgeCards && !!knowledgeCards.formula_sheet && knowledgeCards.formula_sheet.trim().length > 0
   const tabs: TabDef[] = [
     { key: 'original', label: '原文', available: true },
     { key: 'specialist', label: 'AI 精讲', available: !!specialistMarkdown },
     { key: 'per-page', label: '逐页精讲', available: hasPerPage },
+    { key: 'knowledge-cards', label: '知识卡片', available: hasKnowledgeCards },
+    { key: 'formula-sheet', label: '公式速查', available: hasFormulaSheet },
     { key: 'quiz', label: `自测验${hasQuiz ? ` (${quizQuestions!.length})` : ''}`, available: hasQuiz },
   ]
+
+  const canExport = !!specialistMarkdown || hasQuiz
+  const handleExport = useCallback(() => {
+    // Print current tab content using browser print
+    window.print()
+  }, [])
 
   return (
     <motion.article
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4, ease: 'easeOut' }}
-      className="space-y-6"
+      className="space-y-6 print:space-y-4"
     >
       {/* Material header */}
       <MaterialHeader material={material} courseInfo={courseInfo} />
 
       {/* Tab bar */}
-      <TabBar tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />
+      <div className="flex items-center justify-between">
+        <TabBar tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />
+        {canExport && (
+          <button
+            onClick={handleExport}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-text-muted
+                       border border-border-warm rounded-sm
+                       hover:border-red-primary hover:text-red-primary transition-colors
+                       print:hidden shrink-0 ml-3"
+          >
+            <Printer size={12} strokeWidth={1.5} />
+            导出打印
+          </button>
+        )}
+      </div>
 
       {/* Tab content */}
       {activeTab === 'original' && (
         <OriginalContent isPdf={isPdf} pdfUrl={pdfUrl} materialId={material.id} />
       )}
       {activeTab === 'specialist' && specialistMarkdown && (
-        <div className="prose-academic">
-          <ReactMarkdown
-            remarkPlugins={[remarkMath, remarkGfm]}
-            rehypePlugins={[rehypeKatex]}
-            components={mdComponents}
-          >
-            {fixMarkdown(specialistMarkdown)}
-          </ReactMarkdown>
+        <div className="space-y-6">
+          {/* Key concepts + exam traps summary */}
+          {(keyConcepts.length > 0 || examTraps.length > 0) && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 print:grid-cols-2">
+              {keyConcepts.length > 0 && (
+                <div className="border border-border-warm rounded-sm p-4 bg-bg-accent/30">
+                  <h4 className="text-xs font-medium text-text-main uppercase tracking-wider mb-2.5">
+                    核心知识点
+                  </h4>
+                  <ul className="space-y-1.5">
+                    {keyConcepts.map((kp, i) => (
+                      <li key={i} className="text-sm text-text-body flex items-start gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-red-primary mt-1.5 shrink-0" />
+                        <span className="inline-math-wrap">
+                          <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}
+                            components={{ p: ({ children }) => <>{children}</> }}>
+                            {kp}
+                          </ReactMarkdown>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {examTraps.length > 0 && (
+                <div className="border border-accent-gold/30 rounded-sm p-4 bg-accent-gold/5">
+                  <h4 className="text-xs font-medium text-accent-gold uppercase tracking-wider mb-2.5">
+                    考试陷阱
+                  </h4>
+                  <ul className="space-y-1.5">
+                    {examTraps.map((trap, i) => (
+                      <li key={i} className="text-sm text-text-body flex items-start gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-accent-gold mt-1.5 shrink-0" />
+                        <span className="inline-math-wrap">
+                          <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}
+                            components={{ p: ({ children }) => <>{children}</> }}>
+                            {trap}
+                          </ReactMarkdown>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="prose-academic">
+            <ReactMarkdown
+              remarkPlugins={[remarkMath, remarkGfm]}
+              rehypePlugins={[rehypeKatex]}
+              components={mdComponents}
+            >
+              {fixMarkdown(specialistMarkdown)}
+            </ReactMarkdown>
+          </div>
         </div>
       )}
       {activeTab === 'per-page' && hasPerPage && pdfUrl && (
@@ -134,18 +225,58 @@ export default function MaterialReader({
           </Suspense>
         </div>
       )}
+      {activeTab === 'knowledge-cards' && hasKnowledgeCards && (
+        <Suspense
+          fallback={
+            <div className="flex items-center justify-center h-[200px]">
+              <Loader2 size={20} className="animate-spin text-red-primary/60" />
+            </div>
+          }
+        >
+          <KnowledgeCardsTab
+            cards={knowledgeCards!.cards}
+            errorTaxonomy={knowledgeCards!.error_taxonomy}
+          />
+        </Suspense>
+      )}
+      {activeTab === 'formula-sheet' && hasFormulaSheet && (
+        <Suspense
+          fallback={
+            <div className="flex items-center justify-center h-[200px]">
+              <Loader2 size={20} className="animate-spin text-red-primary/60" />
+            </div>
+          }
+        >
+          <FormulaSheetTab formulaSheet={knowledgeCards!.formula_sheet} />
+        </Suspense>
+      )}
       {activeTab === 'quiz' && hasQuiz && (
-        hasV2Questions(quizQuestions!) ? (
-          <QuizPanelV2
-            questions={quizQuestions! as QuestionItem[]}
-            onGenerateFlashcards={onGenerateFlashcards}
-          />
-        ) : (
-          <QuizPanel
-            questions={quizQuestions!}
-            onGenerateFlashcards={onGenerateFlashcards}
-          />
-        )
+        <>
+          {quizModuleFilter && onClearQuizFilter && (
+            <div className="flex items-center gap-2 mb-3 text-xs text-text-muted">
+              <span>当前筛选：<span className="text-text-body font-medium">{quizModuleFilter}</span></span>
+              <button
+                onClick={onClearQuizFilter}
+                className="px-2 py-0.5 border border-border-warm rounded-sm hover:border-red-primary transition-colors text-text-muted hover:text-red-primary"
+              >
+                显示全部
+              </button>
+            </div>
+          )}
+          {hasV2Questions(quizQuestions!) ? (
+            <QuizPanelV2
+              questions={quizQuestions! as QuestionItem[]}
+              onGenerateFlashcards={onGenerateFlashcards}
+              onQuizComplete={handleQuizComplete}
+            />
+          ) : (
+            <QuizPanel
+              questions={quizQuestions!}
+              onGenerateFlashcards={onGenerateFlashcards}
+              onQuizComplete={handleQuizComplete}
+            />
+          )}
+        </>
       )}
     </motion.article>
   )

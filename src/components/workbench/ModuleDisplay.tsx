@@ -2,6 +2,7 @@
  * ModuleDisplay — shows analysis results (modules list), error state,
  * and manual tool selection. Handles the 'complete' and 'error' phases.
  */
+import { useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   BookOpen,
@@ -21,7 +22,8 @@ import {
   RotateCcw,
   FileText,
 } from 'lucide-react'
-import type { DisassemblyModule } from '@/lib/api'
+import type { DisassemblyModule, MCQuestion } from '@/lib/api'
+import { loadProfile, type ModuleMastery } from '@/lib/student-model'
 
 /* ---------- Types ---------- */
 
@@ -35,7 +37,10 @@ interface Tool {
 interface CompletePhaseProps {
   modules: DisassemblyModule[]
   loadingModule: string | null
+  quizQuestions?: MCQuestion[]
+  courseId?: string
   onModuleClick: (mod: DisassemblyModule) => void
+  onModuleQuiz?: (mod: DisassemblyModule) => void
   onReset: () => void
 }
 
@@ -69,9 +74,23 @@ const allTools: Tool[] = [
 export function CompletePhase({
   modules,
   loadingModule,
+  quizQuestions = [],
+  courseId,
   onModuleClick,
+  onModuleQuiz,
   onReset,
 }: CompletePhaseProps) {
+  // Load mastery data for each module (memoized to avoid calling loadProfile on every render)
+  const profile = useMemo(() => courseId ? loadProfile() : null, [courseId])
+  const moduleStates = profile?.modules ?? {}
+
+  // Count quiz questions per module
+  const quizCountByModule = new Map<string, number>()
+  for (const q of quizQuestions) {
+    const count = quizCountByModule.get(q.source_module_name) ?? 0
+    quizCountByModule.set(q.source_module_name, count + 1)
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
@@ -98,33 +117,94 @@ export function CompletePhase({
       </p>
 
       <div className="space-y-2">
-        {modules.map((mod, i) => (
-          <motion.button
-            key={mod.id}
-            initial={{ opacity: 0, x: 8 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: i * 0.06 }}
-            onClick={() => onModuleClick(mod)}
-            disabled={loadingModule === mod.id}
-            className="w-full flex items-start gap-3 p-3 rounded-md border-l-3 border border-border-warm bg-bg-card text-left transition-all border-l-red-primary hover:bg-bg-accent"
-          >
-            {loadingModule === mod.id ? (
-              <Loader2 size={16} className="animate-spin text-accent-gold mt-0.5 shrink-0" />
-            ) : (
-              <FileText size={16} strokeWidth={1.5} className="text-red-primary mt-0.5 shrink-0" />
-            )}
-            <div className="min-w-0 flex-1">
-              <div className="text-sm font-medium text-text-main">{mod.name}</div>
-              <div className="flex items-center gap-2 text-xs text-text-muted mt-0.5">
-                <span>第 {mod.pages} 页</span>
-                <span className="text-[10px]">&middot;</span>
-                <WeightBadge weight={mod.examWeight} />
+        {modules.map((mod, i) => {
+          const modState = moduleStates[mod.id] as ModuleMastery | undefined
+          const mastery = modState?.mastery ?? 0
+          const quizCount = quizCountByModule.get(mod.name) ?? 0
+
+          return (
+            <motion.div
+              key={mod.id}
+              initial={{ opacity: 0, x: 8 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: i * 0.06 }}
+              className="rounded-md border-l-3 border border-border-warm bg-bg-card border-l-red-primary hover:bg-bg-accent transition-all"
+            >
+              <button
+                onClick={() => onModuleClick(mod)}
+                disabled={loadingModule === mod.id}
+                className="w-full flex items-start gap-3 p-3 text-left"
+              >
+                {loadingModule === mod.id ? (
+                  <Loader2 size={16} className="animate-spin text-accent-gold mt-0.5 shrink-0" />
+                ) : (
+                  <FileText size={16} strokeWidth={1.5} className="text-red-primary mt-0.5 shrink-0" />
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-medium text-text-main">{mod.name}</div>
+                  <div className="flex items-center gap-2 text-xs text-text-muted mt-0.5 flex-wrap">
+                    <span>第 {mod.pages} 页</span>
+                    <span className="text-[10px]">&middot;</span>
+                    <WeightBadge weight={mod.examWeight} />
+                    {(modState?.totalAttempts ?? 0) > 0 && (
+                      <SuggestionBadge mastery={mastery} />
+                    )}
+                  </div>
+                </div>
+              </button>
+              {/* Study Kit footer: mastery + quiz shortcut */}
+              <div className="flex items-center gap-3 px-3 pb-2.5 pt-0">
+                <MasteryBar mastery={mastery} />
+                {quizCount > 0 && onModuleQuiz && (
+                  <button
+                    onClick={() => {
+                      onModuleQuiz(mod)
+                    }}
+                    className="text-[10px] text-text-muted hover:text-red-primary transition-colors flex items-center gap-1 shrink-0"
+                  >
+                    <ClipboardCheck size={10} strokeWidth={1.5} />
+                    {quizCount} 题
+                  </button>
+                )}
               </div>
-            </div>
-          </motion.button>
-        ))}
+            </motion.div>
+          )
+        })}
       </div>
     </motion.div>
+  )
+}
+
+/* ---------- Adaptive suggestion ---------- */
+
+function getModuleSuggestion(mastery: number): { text: string; color: string } {
+  if (mastery < 0.3) return { text: '建议精读', color: 'text-red-primary' }
+  if (mastery < 0.6) return { text: '建议做题', color: 'text-amber-600' }
+  if (mastery < 0.8) return { text: '建议复习', color: 'text-blue-600' }
+  return { text: '已掌握 ✓', color: 'text-emerald-600' }
+}
+
+function SuggestionBadge({ mastery }: { mastery: number }) {
+  const { text, color } = getModuleSuggestion(mastery)
+  return (
+    <span className={`px-1.5 py-px text-[10px] border rounded-sm border-border-warm ${color}`}>
+      {text}
+    </span>
+  )
+}
+
+/* ---------- MasteryBar ---------- */
+
+function MasteryBar({ mastery }: { mastery: number }) {
+  const pct = Math.round(mastery * 100)
+  const color = pct >= 70 ? 'bg-green-500' : pct >= 40 ? 'bg-accent-gold' : 'bg-red-primary/60'
+  return (
+    <div className="flex items-center gap-1.5 flex-1 min-w-0">
+      <div className="flex-1 h-1 bg-border-warm rounded-full overflow-hidden">
+        <div className={`h-full rounded-full transition-all ${color}`} style={{ width: `${pct}%` }} />
+      </div>
+      <span className="text-[10px] text-text-muted shrink-0">{pct}%</span>
+    </div>
   )
 }
 

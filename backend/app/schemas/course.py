@@ -78,6 +78,15 @@ class CategoryListResponse(BaseModel):
     total: int
 
 
+class CourseCreateRequest(BaseModel):
+    """Create a user-defined course (lightweight — just name + optional school)."""
+
+    name: str
+    university: str | None = None
+    language: str = "en"
+    tags: list[str] = []
+
+
 class CourseMaterialSourceResponse(BaseModel):
     id: uuid.UUID
     course_id: uuid.UUID

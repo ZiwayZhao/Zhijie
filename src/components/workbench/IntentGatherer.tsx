@@ -45,8 +45,9 @@ export function IdlePhase({ onSelect }: IdlePhaseProps) {
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -8 }}
-      className="space-y-2.5"
+      exit={{ opacity: 0, y: -8, pointerEvents: 'none' as const }}
+      transition={{ duration: 0.2 }}
+      className="space-y-2.5 relative z-10"
     >
       <p className="text-sm text-text-muted">选择你的学习目标，AI 将为你定制分析方案：</p>
       {INTENTS.map((item) => {
@@ -82,8 +83,9 @@ export function GatheringPhase({
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -8 }}
-      className="space-y-4"
+      exit={{ opacity: 0, y: -8, pointerEvents: 'none' as const }}
+      transition={{ duration: 0.2 }}
+      className="space-y-4 relative z-10"
     >
       <button
         onClick={onBack}

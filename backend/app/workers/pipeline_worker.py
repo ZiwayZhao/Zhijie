@@ -25,10 +25,19 @@ from app.models.disassembly import (
     QuizData,
     SpecialistOutput,
 )
-from app.services.llm_client import LLMError, get_llm_client
+from app.models.knowledge_card import KnowledgeCardData
+from app.services.llm_client import LLMError, get_llm_client, get_llm_client_for_user
 from app.services.pdf_parser import PDFParseError, load_parsed_pages, parse_pdf_async
 from app.services.pipeline.cartographer import CartographerResult, run_cartographer
-from app.services.pipeline.examiner import ExaminerModuleInput, run_examiner_v2
+from app.services.pipeline.examiner import (
+    ExaminerModuleInput,
+    extract_formulas_and_examples,
+    run_examiner_v2_iterative,
+)
+from app.services.pipeline.knowledge_cards import (
+    KnowledgeCardModuleInput,
+    run_knowledge_cards,
+)
 from app.services.pipeline.specialist import (
     SpecialistResult,
     run_specialist,
@@ -91,7 +100,6 @@ async def _run_pipeline_async(task_id_str: str):
     task_id = uuid.UUID(task_id_str)
     run_id = uuid.uuid4().hex
     redis_client = _get_redis()
-    llm = get_llm_client()
 
     async with async_session_factory() as session:
         # Load task
@@ -103,6 +111,11 @@ async def _run_pipeline_async(task_id_str: str):
         if task.status == "cancelled":
             logger.info("Task %s was cancelled, skipping", task_id)
             return
+
+        # Use per-user LLM settings if available
+        llm, _user_model = await get_llm_client_for_user(task.user_id)
+        if _user_model:
+            logger.info("Using user-preferred model: %s", _user_model)
 
         # Mark as running
         await _update_task(
@@ -292,8 +305,85 @@ async def _run_pipeline_async(task_id_str: str):
 
                 await session.commit()
 
-            await _update_task(session, task_id, phase="examiner", progress=0.85)
-            _publish_progress(redis_client, task_id_str, "examiner", 0.85, "正在生成测验题...")
+            # ── Phase 3.5: KNOWLEDGE CARDS ────────────────────
+            await _update_task(session, task_id, phase="knowledge-cards", progress=0.82)
+            _publish_progress(redis_client, task_id_str, "knowledge-cards", 0.82, "正在生成知识卡片...")
+
+            # Idempotent: check if knowledge cards exist
+            existing_cards = (await session.execute(
+                select(KnowledgeCardData.id).where(KnowledgeCardData.task_id == task_id)
+            )).scalar_one_or_none()
+
+            if existing_cards:
+                logger.info("Phase 3.5 skip: knowledge cards already exist")
+            else:
+                # Build inputs from specialist outputs
+                all_specs_for_cards = (await session.execute(
+                    select(SpecialistOutput)
+                    .join(DisassemblyModule)
+                    .where(DisassemblyModule.task_id == task_id)
+                    .order_by(DisassemblyModule.sort_order)
+                )).scalars().all()
+
+                card_inputs: list[tuple[int, KnowledgeCardModuleInput]] = []
+                for i, spec_out in enumerate(all_specs_for_cards):
+                    # Get module name from DB
+                    card_module = (await session.execute(
+                        select(DisassemblyModule.name)
+                        .where(DisassemblyModule.id == spec_out.module_id)
+                    )).scalar_one()
+
+                    formulas = None
+                    if spec_out.markdown_s3_key:
+                        try:
+                            from app.services.s3_client import get_s3_client as _get_s3
+                            s3 = _get_s3()
+                            obj = s3.get_object(
+                                Bucket=settings.s3_bucket_name,
+                                Key=spec_out.markdown_s3_key,
+                            )
+                            md_text = obj["Body"].read().decode("utf-8")
+                            formulas = extract_formulas_and_examples(md_text)
+                            if not formulas:
+                                formulas = None
+                        except Exception as e:
+                            logger.warning(
+                                "Failed to extract formulas for cards from %s: %s",
+                                spec_out.markdown_s3_key, e,
+                            )
+
+                    card_inputs.append((i, KnowledgeCardModuleInput(
+                        module_name=card_module,
+                        summary=spec_out.summary or "",
+                        key_concepts=list(spec_out.key_concepts),
+                        exam_traps=list(spec_out.exam_traps or []),
+                        formulas_and_examples=formulas,
+                    )))
+
+                cards_result = await run_knowledge_cards(
+                    specialist_inputs=card_inputs,
+                    llm=llm,
+                    run_id=f"{run_id}_cards",
+                )
+
+                cards_data = cards_result.data
+                session.add(KnowledgeCardData(
+                    task_id=task_id,
+                    material_id=task.material_id,
+                    cards=[c.model_dump() for c in cards_data.cards],
+                    formula_sheet=cards_data.formula_sheet_markdown,
+                    error_taxonomy=cards_data.error_taxonomy_markdown,
+                    model_used=cards_result.model,
+                    prompt_version=cards_result.prompt_version,
+                    input_tokens=cards_result.input_tokens,
+                    output_tokens=cards_result.output_tokens,
+                    latency_ms=cards_result.latency_ms,
+                    run_id=cards_result.run_id,
+                ))
+                await session.commit()
+
+            await _update_task(session, task_id, phase="examiner", progress=0.88)
+            _publish_progress(redis_client, task_id_str, "examiner", 0.88, "正在生成测验题...")
 
             # ── Phase 4: EXAMINER ─────────────────────────────
             # Idempotent: check if quiz exists
@@ -314,27 +404,80 @@ async def _run_pipeline_async(task_id_str: str):
 
                 spec_data = []
                 for i, spec_out in enumerate(all_specs):
+                    # Download specialist markdown from S3 to extract formulas
+                    formulas = None
+                    if spec_out.markdown_s3_key:
+                        try:
+                            from app.services.s3_client import get_s3_client
+                            s3 = get_s3_client()
+                            obj = s3.get_object(
+                                Bucket=settings.s3_bucket_name,
+                                Key=spec_out.markdown_s3_key,
+                            )
+                            md_text = obj["Body"].read().decode("utf-8")
+                            formulas = extract_formulas_and_examples(md_text)
+                            if not formulas:
+                                formulas = None
+                        except Exception as e:
+                            logger.warning(
+                                "Failed to extract formulas from %s: %s",
+                                spec_out.markdown_s3_key, e,
+                            )
+
                     spec_data.append((i, ExaminerModuleInput(
                         summary=spec_out.summary or "",
                         key_concepts=list(spec_out.key_concepts),
                         exam_traps=list(spec_out.exam_traps or []),
+                        formulas_and_examples=formulas,
                     )))
 
                 # Parse exam profile from task if available
+                from app.schemas.exam_profile import ExamProfile
+
                 exam_profile = None
                 if task.exam_profile_json:
-                    from app.schemas.exam_profile import ExamProfile
                     try:
                         exam_profile = ExamProfile(**task.exam_profile_json)
                     except Exception as e:
-                        logger.warning("Failed to parse exam_profile, falling back to v1: %s", e)
+                        logger.warning("Failed to parse exam_profile: %s", e)
 
-                exam_result = await run_examiner_v2(
+                # Auto-infer default exam profile when none was provided
+                if exam_profile is None:
+                    course_name = None
+                    try:
+                        from app.models.material import Material
+                        from app.models.course import Course
+
+                        mat_course_id = (await session.execute(
+                            select(Material.course_id)
+                            .where(Material.id == task.material_id)
+                        )).scalar_one_or_none()
+
+                        if mat_course_id:
+                            course = (await session.execute(
+                                select(Course.name)
+                                .where(Course.id == mat_course_id)
+                            )).scalar_one_or_none()
+                            if course:
+                                course_name = course  # scalar = name string
+                    except Exception as e:
+                        logger.warning("Failed to query course name for default exam profile: %s", e)
+
+                    course_type = course_name or "humanities"
+                    exam_profile = ExamProfile.default_for_course_type(course_type)
+                    logger.info(
+                        "Using default exam profile for course_type=%r (course_name=%r): %d question types",
+                        course_type, course_name,
+                        len(exam_profile.question_distribution),
+                    )
+
+                exam_result = await run_examiner_v2_iterative(
                     plan=plan,
                     specialist_results=spec_data,
                     llm=llm,
                     run_id=run_id,
                     exam_profile=exam_profile,
+                    rounds=3,
                 )
 
                 exam_data = exam_result.data
@@ -342,7 +485,7 @@ async def _run_pipeline_async(task_id_str: str):
                     task_id=task_id,
                     questions=[q.model_dump() for q in exam_data.questions],
                     total_questions=len(exam_data.questions),
-                    schema_version=2 if exam_profile else 1,
+                    schema_version=2,
                     source_module_ids=[m.id for m in db_modules],
                     prompt_version=exam_result.prompt_version,
                     model_used=exam_result.model,

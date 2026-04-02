@@ -13,7 +13,7 @@ import type {
   ToolMistakeAnalysisResult,
   ToolConceptMapResult,
   ToolReadingNotesResult,
-} from '@/lib/api'
+} from '@/lib/api-tools'
 
 /* ---------- Types ---------- */
 

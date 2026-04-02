@@ -3,15 +3,17 @@
  * Supports MCQ, fill-blank, true/false, short answer, and calculation questions.
  * Editorial academic design: warm card borders, red accent, staggered animations.
  */
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { RotateCcw, ChevronRight, BarChart3 } from 'lucide-react'
 import type { QuestionItem } from '@/lib/types/question'
+import type { QuizSessionResult } from '@/hooks/useQuizSession'
 import QuestionRenderer from '@/components/quiz/QuestionRenderer'
 
 interface QuizPanelV2Props {
   questions: QuestionItem[]
   onGenerateFlashcards?: () => void
+  onQuizComplete?: (results: QuizSessionResult[]) => void
 }
 
 /* ---------- Type label mapping ---------- */
@@ -134,8 +136,9 @@ function ScoreSummary({
 
 /* ---------- Main Component ---------- */
 
-export default function QuizPanelV2({ questions, onGenerateFlashcards }: QuizPanelV2Props) {
+export default function QuizPanelV2({ questions, onGenerateFlashcards, onQuizComplete }: QuizPanelV2Props) {
   const [results, setResults] = useState<Record<number, { correct: boolean; points: number }>>({})
+  const completeFired = useRef(false)
 
   const handleAnswer = useCallback((qIdx: number, correct: boolean, points: number) => {
     setResults(prev => {
@@ -146,10 +149,27 @@ export default function QuizPanelV2({ questions, onGenerateFlashcards }: QuizPan
 
   const handleRetry = useCallback(() => {
     setResults({})
+    completeFired.current = false
   }, [])
 
   const answeredCount = Object.keys(results).length
-  const allAnswered = answeredCount === questions.length
+  const allAnswered = answeredCount === questions.length && questions.length > 0
+
+  // Fire onQuizComplete once when all questions are answered
+  useEffect(() => {
+    if (!allAnswered || completeFired.current || !onQuizComplete) return
+    completeFired.current = true
+
+    const sessionResults: QuizSessionResult[] = questions.map((q, i) => ({
+      sourceModuleName: q.source_module_name,
+      questionType: q.question_type,
+      correct: results[i]?.correct ?? false,
+      earnedPoints: results[i]?.points ?? 0,
+      maxPoints: q.points,
+    }))
+
+    onQuizComplete(sessionResults)
+  }, [allAnswered, onQuizComplete, questions, results])
 
   const totalPoints = useMemo(() =>
     questions.reduce((sum, q) => sum + q.points, 0),

@@ -5,7 +5,7 @@
  *
  * No AI slop — no purple gradients, no Inter font, no generic card shadows.
  */
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Check, X, BookOpen, ChevronRight, RotateCcw } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
@@ -17,9 +17,12 @@ import type { MCQuestion } from '@/lib/api'
 
 export type { MCQuestion }
 
+import type { QuizSessionResult } from '@/hooks/useQuizSession'
+
 interface QuizPanelProps {
   questions: MCQuestion[]
   onGenerateFlashcards?: () => void
+  onQuizComplete?: (results: QuizSessionResult[]) => void
 }
 
 /* ---------- Plain-text → LaTeX pre-processor ---------- */
@@ -345,8 +348,9 @@ function ScoreSummary({
 
 /* ---------- Main Component ---------- */
 
-export default function QuizPanel({ questions, onGenerateFlashcards }: QuizPanelProps) {
+export default function QuizPanel({ questions, onGenerateFlashcards, onQuizComplete }: QuizPanelProps) {
   const [answers, setAnswers] = useState<Record<number, number>>({})
+  const [completeFired, setCompleteFired] = useState(false)
 
   const handleSelect = useCallback((questionIdx: number, optionIdx: number) => {
     setAnswers(prev => {
@@ -357,6 +361,7 @@ export default function QuizPanel({ questions, onGenerateFlashcards }: QuizPanel
 
   const handleRetry = useCallback(() => {
     setAnswers({})
+    setCompleteFired(false)
   }, [])
 
   const answeredCount = Object.keys(answers).length
@@ -364,6 +369,21 @@ export default function QuizPanel({ questions, onGenerateFlashcards }: QuizPanel
   const correctCount = Object.entries(answers).filter(
     ([qIdx, aIdx]) => questions[Number(qIdx)]?.correct_index === aIdx,
   ).length
+
+  // Fire mastery update when all questions answered (in effect to avoid setState during render)
+  useEffect(() => {
+    if (allAnswered && !completeFired && onQuizComplete) {
+      setCompleteFired(true)
+      const results: QuizSessionResult[] = questions.map((q, i) => ({
+        sourceModuleName: q.source_module_name,
+        questionType: 'mcq',
+        correct: answers[i] === q.correct_index,
+        earnedPoints: answers[i] === q.correct_index ? 1 : 0,
+        maxPoints: 1,
+      }))
+      onQuizComplete(results)
+    }
+  }, [allAnswered, completeFired, onQuizComplete, questions, answers])
 
   if (questions.length === 0) {
     return (

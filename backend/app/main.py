@@ -56,6 +56,9 @@ def create_app() -> FastAPI:
     from app.api.v1.agenda import router as agenda_router
     from app.api.v1.tutor_history import router as tutor_history_router
     from app.api.v1.card_evolution import router as card_evolution_router
+    from app.api.v1.chat import router as chat_router
+    from app.api.v1.tools import router as tools_router
+    from app.api.v1.user_settings import router as user_settings_router
     app.include_router(health_router, prefix=settings.api_v1_prefix)
     app.include_router(auth_router, prefix=settings.api_v1_prefix)
     app.include_router(oauth_router, prefix=settings.api_v1_prefix)
@@ -70,6 +73,9 @@ def create_app() -> FastAPI:
     app.include_router(agenda_router, prefix=settings.api_v1_prefix)
     app.include_router(tutor_history_router, prefix=settings.api_v1_prefix)
     app.include_router(card_evolution_router, prefix=settings.api_v1_prefix)
+    app.include_router(chat_router, prefix=settings.api_v1_prefix)
+    app.include_router(tools_router, prefix=settings.api_v1_prefix)
+    app.include_router(user_settings_router, prefix=settings.api_v1_prefix)
 
     return app
 

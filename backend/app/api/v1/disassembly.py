@@ -21,6 +21,7 @@ from app.models.disassembly import (
     QuizData,
     SpecialistOutput,
 )
+from app.models.knowledge_card import KnowledgeCardData
 from app.models.material import Material
 from app.models.user import User
 from app.schemas.disassembly import (
@@ -36,6 +37,7 @@ from app.schemas.disassembly import (
     StartAnalysisResponse,
     TaskStatusResponse,
 )
+from app.schemas.knowledge_card import KnowledgeCardResponse
 from app.services.s3_client import get_s3_client
 from app.services.sse_ticket import create_ticket, verify_ticket
 from app.workers.pipeline_worker import run_pipeline
@@ -322,10 +324,28 @@ async def task_result(
             prompt_version=quiz_row.prompt_version,
         )
 
+    # Load knowledge cards
+    cards_row = (await db.execute(
+        select(KnowledgeCardData).where(KnowledgeCardData.task_id == task_id)
+    )).scalar_one_or_none()
+
+    knowledge_cards = None
+    if cards_row:
+        knowledge_cards = KnowledgeCardResponse(
+            id=cards_row.id,
+            task_id=cards_row.task_id,
+            cards=list(cards_row.cards),
+            formula_sheet=cards_row.formula_sheet,
+            error_taxonomy=cards_row.error_taxonomy,
+            model_used=cards_row.model_used,
+            prompt_version=cards_row.prompt_version,
+        )
+
     return DisassemblyResultResponse(
         task=TaskStatusResponse.model_validate(task),
         modules=module_summaries,
         quiz=quiz,
+        knowledge_cards=knowledge_cards,
     )
 
 
@@ -401,6 +421,47 @@ async def module_detail(
             ModuleDependencyResponse(module_id=d.module_id, depends_on_id=d.depends_on_id)
             for d in deps
         ],
+    )
+
+
+# ── GET /disassembly/{task_id}/knowledge-cards ───────────────────
+
+@router.get("/tasks/{task_id}/knowledge-cards", response_model=KnowledgeCardResponse)
+async def knowledge_cards(
+    task_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Get knowledge cards for a completed task."""
+    task = await _get_task_or_404(task_id, user, db)
+
+    if task.status != "completed":
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": DisassemblyErrorCode.TASK_NOT_COMPLETED,
+                "detail": f"Task status is '{task.status}', not 'completed'",
+            },
+        )
+
+    cards_row = (await db.execute(
+        select(KnowledgeCardData).where(KnowledgeCardData.task_id == task_id)
+    )).scalar_one_or_none()
+
+    if not cards_row:
+        raise HTTPException(
+            status_code=404,
+            detail={"detail": "Knowledge cards not yet generated for this task"},
+        )
+
+    return KnowledgeCardResponse(
+        id=cards_row.id,
+        task_id=cards_row.task_id,
+        cards=list(cards_row.cards),
+        formula_sheet=cards_row.formula_sheet,
+        error_taxonomy=cards_row.error_taxonomy,
+        model_used=cards_row.model_used,
+        prompt_version=cards_row.prompt_version,
     )
 
 

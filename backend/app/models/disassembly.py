@@ -40,7 +40,7 @@ class DisassemblyTask(Base):
             name="ck_dtask_status",
         ),
         CheckConstraint(
-            "phase IN ('init','parsing','cartographer','specialist','examiner','done')",
+            "phase IN ('init','parsing','cartographer','specialist','knowledge-cards','examiner','done')",
             name="ck_dtask_phase",
         ),
         UniqueConstraint("run_id", name="uq_dtask_run_id"),

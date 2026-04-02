@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 PROMPT_VERSION = "exam_v1"
 PROMPT_VERSION_V2 = "exam_v2"
-MODEL = "anthropic/claude-sonnet-4.5"
+MODEL = "hunyuan-turbos"
 
 
 # ── Input DTO (lightweight, no validation constraints) ────────────
@@ -28,6 +28,7 @@ class ExaminerModuleInput(BaseModel):
     summary: str
     key_concepts: list[str]
     exam_traps: list[str] = []
+    formulas_and_examples: str | None = None
 
 
 # ── Structured Output Schema ─────────────────────────────────────
@@ -117,6 +118,8 @@ def _build_examiner_input(
         lines.append(f"Key concepts: {', '.join(spec.key_concepts)}")
         if spec.exam_traps:
             lines.append(f"Common mistakes: {', '.join(spec.exam_traps)}")
+        if spec.formulas_and_examples:
+            lines.append(f"Formulas & Examples:\n{spec.formulas_and_examples}")
 
     return "\n".join(lines)
 
@@ -218,7 +221,11 @@ Your task: Given module summaries, key concepts, and an **exam format specificat
 6. Explanations should teach, not just state the answer
 7. Avoid trivial recall questions — test understanding and application
 8. Include some questions that require connecting concepts across modules
-9. source_module_name must exactly match a module name from the input"""
+9. source_module_name must exactly match a module name from the input
+10. **计算题必须包含完整的数值代入过程和中间步骤**
+11. **每个MCQ错误选项必须在explanation中说明'错在哪里'**
+12. **至少2道题需要综合多个模块的知识点**
+13. **使用每个模块提供的公式和例题作为出题素材，确保计算题使用真实公式和数值**"""
 
 
 def _build_exam_format_section(exam_profile: ExamProfile) -> str:
@@ -263,6 +270,8 @@ def _build_examiner_input_v2(
         lines.append(f"Key concepts: {', '.join(spec.key_concepts)}")
         if spec.exam_traps:
             lines.append(f"Common mistakes: {', '.join(spec.exam_traps)}")
+        if spec.formulas_and_examples:
+            lines.append(f"Formulas & Examples:\n{spec.formulas_and_examples}")
 
     return "\n".join(lines)
 
@@ -273,6 +282,7 @@ async def run_examiner_v2(
     llm: LLMClient,
     run_id: str,
     exam_profile: ExamProfile | None = None,
+    dedup_context: str = "",
 ) -> LLMResult:
     """Execute Examiner v2 — multi-type question generation.
 
@@ -285,6 +295,7 @@ async def run_examiner_v2(
         llm: LLMClient instance.
         run_id: Execution run ID.
         exam_profile: Optional exam format specification.
+        dedup_context: Previously generated questions to avoid duplication.
 
     Returns:
         LLMResult with ExaminerResultV2 in .data (or ExaminerResult for v1 fallback).
@@ -299,6 +310,8 @@ async def run_examiner_v2(
     input_text = _build_examiner_input_v2(
         plan, specialist_results, exam_format_section,
     )
+    if dedup_context:
+        input_text += f"\n\n{dedup_context}"
 
     result = await llm.structured_output(
         model=MODEL,
@@ -306,6 +319,7 @@ async def run_examiner_v2(
         messages=[{"role": "user", "content": input_text}],
         response_schema=ExaminerResultV2,
         prompt_version=PROMPT_VERSION_V2,
+        max_tokens=16384,
         run_id=run_id,
     )
 
@@ -321,3 +335,133 @@ async def run_examiner_v2(
     )
 
     return result
+
+
+# ── Formula extraction helper ────────────────────────────────────
+
+
+def extract_formulas_and_examples(markdown: str) -> str:
+    """Extract LaTeX formulas and example problems from specialist markdown."""
+    lines = markdown.split('\n')
+    extracted = []
+    in_block = False
+    for line in lines:
+        # Capture LaTeX display math
+        if '$$' in line:
+            extracted.append(line)
+            in_block = not in_block
+        elif in_block:
+            extracted.append(line)
+        # Capture inline formulas and key equations
+        elif '$' in line and line.count('$') >= 2:
+            extracted.append(line)
+        # Capture example/calculation sections
+        elif any(kw in line.lower() for kw in (
+            '例题', '计算', 'cost =', 'cost=', '代价',
+            '公式', 'example', 'formula',
+        )):
+            extracted.append(line)
+    # Limit to ~2000 chars
+    joined = '\n'.join(extracted)
+    return joined[-2000:] if len(joined) > 2000 else joined
+
+
+# ── Iterative multi-round question generation ────────────────────
+
+
+MAX_QUESTIONS_CAP = 50
+"""Hard cap on total questions to prevent runaway generation."""
+
+
+async def run_examiner_v2_iterative(
+    plan: CartographerResult,
+    specialist_results: list[tuple[int, ExaminerModuleInput]],
+    llm: LLMClient,
+    run_id: str,
+    exam_profile: ExamProfile | None = None,
+    rounds: int = 3,
+) -> LLMResult:
+    """Multi-round question generation with deduplication.
+
+    Intentionally runs multiple rounds (default 3) to produce a large,
+    diverse question bank (typically 30+ questions). Each round generates
+    a full set per the exam profile, with dedup context to avoid repeats.
+
+    A hard cap of MAX_QUESTIONS_CAP (50) prevents runaway generation.
+
+    Args:
+        plan: Cartographer's disassembly plan.
+        specialist_results: List of (module_index, ExaminerModuleInput).
+        llm: LLMClient instance.
+        run_id: Execution run ID.
+        exam_profile: Optional exam format specification.
+        rounds: Number of generation rounds (default 3).
+
+    Returns:
+        LLMResult with combined ExaminerResultV2 containing all questions.
+    """
+    all_questions: list[QuestionItem] = []
+    total_input_tokens = 0
+    total_output_tokens = 0
+    total_latency = 0
+    last_result: LLMResult | None = None
+
+    # Split question counts across rounds to stay within output token limits
+    round_profile = exam_profile
+    if exam_profile and exam_profile.question_distribution and rounds > 1:
+        from app.schemas.exam_profile import QuestionTypeDistribution
+        split_dist = []
+        for qtd in exam_profile.question_distribution:
+            per_round = max(1, qtd.count // rounds)
+            split_dist.append(QuestionTypeDistribution(
+                question_type=qtd.question_type,
+                count=per_round,
+                points_each=qtd.points_each,
+                total_points=per_round * qtd.points_each,
+                percentage=qtd.percentage,
+            ))
+        round_profile = exam_profile.model_copy(
+            update={"question_distribution": split_dist},
+        )
+
+    for round_num in range(rounds):
+        # Build dedup context from previous questions
+        dedup_context = ""
+        if all_questions:
+            dedup_context = "以下题目已出过，请出不同角度和知识点的新题：\n"
+            dedup_context += "\n".join(
+                f"- {q.question[:80]}" for q in all_questions[:30]
+            )
+
+        result = await run_examiner_v2(
+            plan, specialist_results, llm, run_id,
+            exam_profile=round_profile,
+            dedup_context=dedup_context,
+        )
+        last_result = result
+        all_questions.extend(result.data.questions)
+        total_input_tokens += result.input_tokens
+        total_output_tokens += result.output_tokens
+        total_latency += result.latency_ms
+
+        logger.info(
+            "Examiner iterative round %d/%d: +%d questions (total %d)",
+            round_num + 1, rounds,
+            len(result.data.questions), len(all_questions),
+        )
+
+        # Enforce hard cap to prevent runaway generation
+        if len(all_questions) >= MAX_QUESTIONS_CAP:
+            all_questions = all_questions[:MAX_QUESTIONS_CAP]
+            logger.info("Examiner: hit max cap of %d questions, stopping early", MAX_QUESTIONS_CAP)
+            break
+
+    return LLMResult(
+        data=ExaminerResultV2(questions=all_questions),
+        prompt_version=last_result.prompt_version,
+        model=last_result.model,
+        input_tokens=total_input_tokens,
+        output_tokens=total_output_tokens,
+        latency_ms=total_latency,
+        run_id=last_result.run_id,
+    )

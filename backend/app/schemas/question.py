@@ -96,4 +96,4 @@ class ExaminerResultV2(BaseModel):
 
     Constrains output to 3-30 questions to keep generation focused.
     """
-    questions: list[QuestionItem] = Field(min_length=3, max_length=30)
+    questions: list[QuestionItem] = Field(min_length=3, max_length=100)

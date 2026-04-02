@@ -41,8 +41,10 @@ class Settings(BaseSettings):
     s3_bucket_name: str = "zhijie-materials"
     s3_region: str = "us-east-1"
 
-    # LLM (OpenRouter)
+    # LLM (OpenRouter or Tencent CodingPlan)
     openrouter_api_key: str = Field(default="", alias="OPENROUTER_API_KEY")
+    llm_base_url: str = Field(default="", alias="LLM_BASE_URL")
+    llm_api_key: str = Field(default="", alias="LLM_API_KEY")
 
     # OpenDataLoader PDF (enhanced extraction with image bounding boxes)
     odl_enabled: bool = True
