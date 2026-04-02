@@ -1,6 +1,12 @@
 /**
  * useTutorSession — useReducer state machine for tutor chat.
  * Manages SSE connection lifecycle, message accumulation, and localStorage persistence.
+ *
+ * Wave 0 enhancements:
+ * - Handle new SSE events: tool_call.start, context.compressed, degraded, usage
+ * - Track tool call progress descriptions
+ * - Context budget awareness
+ * - Degradation status display
  */
 
 import { useReducer, useCallback, useRef, useEffect } from 'react'
@@ -8,9 +14,16 @@ import { startTutorChat, type ChatMessage } from '@/lib/api-tutor'
 import type { SSEEvent } from '@/lib/sse-parser'
 import type {
   PlanCompletedData,
+  PlanStepData,
+  ToolCallStartData,
   ToolResultData as SSEToolResultData,
   AnswerDeltaData,
   AnswerCompletedData,
+  ContextCompressedData,
+  DegradedData,
+  UsageData,
+  LoopStepStartData,
+  LoopStepCompleteData,
   ErrorData,
 } from '@/lib/api-tutor'
 
@@ -36,6 +49,9 @@ export interface PlanInfo {
   intent: string
   reasoning: string
   tools: string[]
+  /** Multi-step plan steps (Wave 1 QueryLoop) */
+  steps?: PlanStepData[]
+  isMultiStep?: boolean
 }
 
 export interface TutorMessage {
@@ -45,6 +61,15 @@ export interface TutorMessage {
   timestamp: number
   plan?: PlanInfo
   toolResults?: ToolResultItem[]
+  /** Message type for visual styling (Wave 0: draft/proactive support) */
+  messageType?: 'response' | 'proactive' | 'draft'
+}
+
+/** Context budget tracking (Wave 0) */
+export interface ContextBudget {
+  usedTokens: number
+  maxTokens: number
+  percentage: number
 }
 
 export interface TutorState {
@@ -54,6 +79,16 @@ export interface TutorState {
   currentToolResults: ToolResultItem[]
   streamingContent: string
   error: string | null
+  /** Currently active tool call description for UI progress indicator */
+  activeToolDescription: string | null
+  /** Context budget tracking (D5/D8) */
+  contextBudget: ContextBudget | null
+  /** Degradation status message (P1) */
+  degradedMessage: string | null
+  /** Multi-step loop progress (Wave 1) */
+  currentStep: number | null
+  totalSteps: number | null
+  stepDescription: string | null
 }
 
 /* ── Actions ────────────────────────────────────────── */
@@ -62,10 +97,16 @@ type TutorAction =
   | { type: 'SEND_MESSAGE'; content: string }
   | { type: 'SESSION_STARTED' }
   | { type: 'PLAN_COMPLETED'; data: PlanCompletedData }
+  | { type: 'TOOL_CALL_START'; data: ToolCallStartData }
   | { type: 'TOOL_RESULT'; data: SSEToolResultData }
   | { type: 'ANSWER_DELTA'; data: AnswerDeltaData }
   | { type: 'ANSWER_COMPLETED'; data: AnswerCompletedData }
   | { type: 'SESSION_COMPLETED' }
+  | { type: 'CONTEXT_COMPRESSED'; data: ContextCompressedData }
+  | { type: 'DEGRADED'; data: DegradedData }
+  | { type: 'USAGE'; data: UsageData }
+  | { type: 'LOOP_STEP_START'; data: LoopStepStartData }
+  | { type: 'LOOP_STEP_COMPLETE'; data: LoopStepCompleteData }
   | { type: 'SSE_ERROR'; data: ErrorData }
   | { type: 'CONNECTION_ERROR'; error: string }
   | { type: 'RESET' }
@@ -83,6 +124,12 @@ const INITIAL_STATE: TutorState = {
   currentToolResults: [],
   streamingContent: '',
   error: null,
+  activeToolDescription: null,
+  contextBudget: null,
+  degradedMessage: null,
+  currentStep: null,
+  totalSteps: null,
+  stepDescription: null,
 }
 
 function tutorReducer(state: TutorState, action: TutorAction): TutorState {
@@ -113,10 +160,19 @@ function tutorReducer(state: TutorState, action: TutorAction): TutorState {
         intent: action.data.intent,
         reasoning: action.data.reasoning,
         tools: action.data.tools_to_call,
+        steps: action.data.steps,
+        isMultiStep: action.data.is_multi_step,
       }
       const nextPhase = plan.tools.length > 0 ? 'tool-running' : 'answering'
       return { ...state, phase: nextPhase as TutorPhase, currentPlan: plan }
     }
+
+    case 'TOOL_CALL_START':
+      return {
+        ...state,
+        phase: 'tool-running',
+        activeToolDescription: action.data.description,
+      }
 
     case 'TOOL_RESULT': {
       const item: ToolResultItem = {
@@ -129,6 +185,7 @@ function tutorReducer(state: TutorState, action: TutorAction): TutorState {
         ...state,
         phase: 'tool-running',
         currentToolResults: [...state.currentToolResults, item],
+        activeToolDescription: null,
       }
     }
 
@@ -160,7 +217,56 @@ function tutorReducer(state: TutorState, action: TutorAction): TutorState {
     }
 
     case 'SESSION_COMPLETED':
-      return { ...state, phase: 'idle' }
+      return { ...state, phase: 'idle', degradedMessage: null }
+
+    case 'CONTEXT_COMPRESSED': {
+      // Insert a system message showing compression happened (D5)
+      const compressMsg: TutorMessage = {
+        id: genId(),
+        role: 'system',
+        content: `对话已自动压缩（${action.data.trigger}）。已保留关键学习进度。`,
+        timestamp: Date.now(),
+        messageType: 'proactive',
+      }
+      return {
+        ...state,
+        messages: [...state.messages, compressMsg],
+        contextBudget: {
+          usedTokens: action.data.tokens_after,
+          maxTokens: state.contextBudget?.maxTokens ?? 128000,
+          percentage: state.contextBudget?.maxTokens
+            ? Math.round((action.data.tokens_after / state.contextBudget.maxTokens) * 100)
+            : 50,
+        },
+      }
+    }
+
+    case 'DEGRADED':
+      return { ...state, degradedMessage: action.data.message }
+
+    case 'USAGE':
+      return {
+        ...state,
+        contextBudget: {
+          usedTokens: action.data.used_tokens,
+          maxTokens: action.data.max_tokens,
+          percentage: action.data.percentage,
+        },
+      }
+
+    case 'LOOP_STEP_START':
+      return {
+        ...state,
+        currentStep: action.data.step,
+        totalSteps: action.data.total_steps,
+        stepDescription: action.data.description,
+      }
+
+    case 'LOOP_STEP_COMPLETE':
+      return {
+        ...state,
+        stepDescription: null,
+      }
 
     case 'SSE_ERROR': {
       const errMsg: TutorMessage = {
@@ -242,6 +348,7 @@ function persistMessages(materialId: string, messages: TutorMessage[]): void {
 export function useTutorSession(
   materialId: string,
   moduleId?: string | null,
+  examMaterialIds?: string[],
 ) {
   const [state, dispatch] = useReducer(tutorReducer, INITIAL_STATE, () => {
     const saved = loadPersistedMessages(materialId)
@@ -292,6 +399,7 @@ export function useTutorSession(
           moduleId: moduleId ?? undefined,
           userMessage: trimmed,
           conversationHistory: history,
+          examMaterialIds: examMaterialIds?.length ? examMaterialIds : undefined,
         },
         (event: SSEEvent) => {
           switch (event.event) {
@@ -300,6 +408,9 @@ export function useTutorSession(
               break
             case 'plan.completed':
               dispatch({ type: 'PLAN_COMPLETED', data: event.data as PlanCompletedData })
+              break
+            case 'tool_call.start':
+              dispatch({ type: 'TOOL_CALL_START', data: event.data as ToolCallStartData })
               break
             case 'tool.result':
               dispatch({ type: 'TOOL_RESULT', data: event.data as SSEToolResultData })
@@ -312,6 +423,21 @@ export function useTutorSession(
               break
             case 'session.completed':
               dispatch({ type: 'SESSION_COMPLETED' })
+              break
+            case 'context.compressed':
+              dispatch({ type: 'CONTEXT_COMPRESSED', data: event.data as ContextCompressedData })
+              break
+            case 'degraded':
+              dispatch({ type: 'DEGRADED', data: event.data as DegradedData })
+              break
+            case 'usage':
+              dispatch({ type: 'USAGE', data: event.data as UsageData })
+              break
+            case 'loop.step_start':
+              dispatch({ type: 'LOOP_STEP_START', data: event.data as LoopStepStartData })
+              break
+            case 'loop.step_complete':
+              dispatch({ type: 'LOOP_STEP_COMPLETE', data: event.data as LoopStepCompleteData })
               break
             case 'error':
               dispatch({ type: 'SSE_ERROR', data: event.data as ErrorData })

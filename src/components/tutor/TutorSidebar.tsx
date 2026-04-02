@@ -4,11 +4,13 @@
  */
 
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { motion } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion'
 import { Send, Loader2, RotateCcw, BookOpen } from 'lucide-react'
 import { useTutorSession } from '@/hooks/useTutorSession'
 import type { TutorPhase } from '@/hooks/useTutorSession'
 import TutorMessage from '@/components/tutor/TutorMessage'
+import { ToolProgress } from '@/components/tutor/ToolProgress'
+import { ContextBudgetBar } from '@/components/tutor/ContextBudgetBar'
 import type { MCQuestion } from '@/lib/api-disassembly'
 
 /* ---------- Phase status text ---------- */
@@ -25,6 +27,8 @@ const PHASE_STATUS: Partial<Record<TutorPhase, string>> = {
 interface TutorSidebarProps {
   materialId: string
   moduleId?: string | null
+  /** IDs of exam/exercise materials to include as context for exam-aware answers */
+  examMaterialIds?: string[]
   onSpecialistView?: (markdown: string, moduleName: string) => void
   onQuizView?: (questions: MCQuestion[]) => void
 }
@@ -34,10 +38,11 @@ interface TutorSidebarProps {
 export default function TutorSidebar({
   materialId,
   moduleId,
+  examMaterialIds,
   onSpecialistView,
   onQuizView,
 }: TutorSidebarProps) {
-  const { state, sendMessage, reset } = useTutorSession(materialId, moduleId)
+  const { state, sendMessage, reset } = useTutorSession(materialId, moduleId, examMaterialIds)
   const [input, setInput] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -114,6 +119,29 @@ export default function TutorSidebar({
         )}
       </div>
 
+      {/* Context budget bar (Wave 5) */}
+      {state.contextBudget && (
+        <ContextBudgetBar
+          usedTokens={state.contextBudget.usedTokens}
+          maxTokens={state.contextBudget.maxTokens}
+          percentage={state.contextBudget.percentage}
+        />
+      )}
+
+      {/* Degradation notice (Wave 5) */}
+      <AnimatePresence>
+        {state.degradedMessage && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="px-3 py-2 mb-2 bg-accent-gold/10 border border-accent-gold/30 rounded-sm"
+          >
+            <p className="text-[11px] text-accent-gold">{state.degradedMessage}</p>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Messages area (scrollable) */}
       <div className="flex-1 overflow-y-auto min-h-0 pr-1">
         {/* Empty state */}
@@ -160,6 +188,15 @@ export default function TutorSidebar({
             onViewQuiz={handleViewQuiz}
           />
         ))}
+
+        {/* Tool progress indicator (Wave 5) */}
+        <ToolProgress
+          activeToolDescription={state.activeToolDescription}
+          currentStep={state.currentStep}
+          totalSteps={state.totalSteps}
+          stepDescription={state.stepDescription}
+          phase={state.phase}
+        />
 
         {/* Streaming content (live) */}
         {state.streamingContent && (
