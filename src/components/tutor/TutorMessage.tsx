@@ -136,7 +136,13 @@ export default function TutorMessage({
     )
   }
 
-  // Assistant message
+  // Assistant message — skip rendering if completely empty (no content, no plan, no tool results)
+  const hasContent = parsed.trim().length > 0
+  const hasPlan = !!message.plan
+  const hasToolResults = !!message.toolResults && message.toolResults.length > 0
+
+  if (!hasContent && !hasPlan && !hasToolResults) return null
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 6 }}
@@ -145,10 +151,10 @@ export default function TutorMessage({
       className="mb-4 pl-3 border-l-3 border-l-red-primary"
     >
       {/* Plan indicator (collapsible) */}
-      {message.plan && <PlanIndicator plan={message.plan} />}
+      {hasPlan && <PlanIndicator plan={message.plan!} />}
 
       {/* Tool results */}
-      {message.toolResults?.map((tr: ToolResultItem, i: number) => (
+      {hasToolResults && message.toolResults!.map((tr: ToolResultItem, i: number) => (
         <ToolResultCard
           key={`${tr.toolName}-${i}`}
           result={tr}
@@ -158,15 +164,17 @@ export default function TutorMessage({
       ))}
 
       {/* Answer body (markdown) */}
-      <div className="tutor-markdown">
-        <ReactMarkdown
-          remarkPlugins={[remarkMath, remarkGfm]}
-          rehypePlugins={[rehypeKatex]}
-          components={chatMdComponents}
-        >
-          {parsed}
-        </ReactMarkdown>
-      </div>
+      {hasContent && (
+        <div className="tutor-markdown">
+          <ReactMarkdown
+            remarkPlugins={[remarkMath, remarkGfm]}
+            rehypePlugins={[rehypeKatex]}
+            components={chatMdComponents}
+          >
+            {parsed}
+          </ReactMarkdown>
+        </div>
+      )}
     </motion.div>
   )
 }
