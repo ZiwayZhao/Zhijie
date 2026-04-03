@@ -29,7 +29,7 @@ const TYPE_LABELS: Record<string, string> = {
 const TYPE_COLORS: Record<string, string> = {
   mcq: 'border-sky-200 bg-sky-50 text-sky-700',
   fill_blank: 'border-blue-200 bg-blue-50 text-blue-700',
-  true_false: 'border-violet-200 bg-violet-50 text-violet-700',
+  true_false: 'border-amber-200 bg-amber-50 text-amber-700',
   short_answer: 'border-orange-200 bg-orange-50 text-orange-700',
   calculation: 'border-teal-200 bg-teal-50 text-teal-700',
 }
@@ -61,7 +61,7 @@ function ScoreSummary({
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      className="border border-border-warm rounded-lg p-5 bg-bg-card"
+      className="border border-border-warm rounded-sm p-5 bg-bg-card"
     >
       {/* Overall score */}
       <div className="text-center mb-4">

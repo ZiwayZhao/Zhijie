@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 PROMPT_VERSION = "spec_v1"
 MODEL = "hunyuan-turbos"
 MAX_CONCURRENT = 3  # Semaphore limit to avoid rate limiting
-SINGLE_MODULE_TIMEOUT = 300  # seconds (5 min for large modules)
+SINGLE_MODULE_TIMEOUT = 600  # seconds (10 min — JSON prompt fallback is slower)
 
 
 # ── Structured Output Schema ─────────────────────────────────────
@@ -69,14 +69,16 @@ Your task: Given the raw content of a specific module from course materials, pro
 
 Rules:
 1. **ALWAYS write in Chinese (中文)**. Even if the source material is in English, your output must be entirely in Chinese. Keep technical terms in English parenthetically where helpful, e.g. "特征值 (eigenvalue)".
-2. Use Markdown formatting with proper headings (##, ###)
-3. Include LaTeX formulas where applicable ($inline$ and $$block$$). All formulas must use proper LaTeX notation (e.g. $\\rho_m$ not ρ_m, $\\Delta h$ not Δh).
-4. Explain concepts step by step, as if teaching a student
-5. Highlight exam-relevant points and common mistakes
-6. Each key concept should be clearly defined
-7. Self-test questions should check understanding, not just recall
-8. Keep lecture_markdown comprehensive but focused (1500-4000 words)
-9. summary should be a concise overview in 1-2 sentences"""
+2. Use Markdown formatting with proper headings (##, ###).
+3. **LaTeX 公式是必须的**：每个模块至少包含 3 个 $inline$ 公式和 2 个 $$block$$ 公式。所有形式定义、定理、方程必须使用 LaTeX 表示（e.g. $\\rho_m$ not ρ_m, $\\Delta h$ not Δh）。
+4. Explain concepts step by step, as if teaching a student.
+5. Highlight exam-relevant points and common mistakes.
+6. Each key concept should be clearly defined.
+7. **self_test_questions 是必需字段**，每个模块必须输出 2-5 道自测题。自测题应考查理解而非简单记忆，禁止省略。
+8. Keep lecture_markdown comprehensive but focused (1500-4000 words). 若源材料偏少（如仅 2-3 页），应通过补充直觉解释、类比和应用实例来达到 1500 字下限，不得草草了事。
+9. **summary** 必须是 1-2 句独立的模块摘要，概括本模块的核心内容和学习价值，不要使用列表或要点格式。
+10. **不使用任何 emoji 符号**。全文禁止出现 emoji。
+11. **禁止重复其他模块内容**。你将在 course context 中看到所有模块的标题列表，只讲授当前模块范围内的内容。如果某概念属于其他模块，仅做简要引用（如"详见模块X"），不展开讲解。"""
 
 
 async def _process_single_module(
@@ -173,8 +175,12 @@ async def run_specialist(
     llm: LLMClient,
     run_id: str,
     on_module_complete: Callable[[int, int], Any] | None = None,
+    on_module_result: Callable[[int, LLMResult], Any] | None = None,
 ) -> list[tuple[int, LLMResult]]:
     """Execute the Specialist agent on all modules in parallel.
+
+    Resilient: individual module failures are logged but don't abort the batch.
+    Successfully completed modules are returned; failed ones are skipped.
 
     Args:
         parsed: Full parsed PDF.
@@ -182,9 +188,11 @@ async def run_specialist(
         llm: LLMClient instance.
         run_id: Execution run ID.
         on_module_complete: Optional callback(completed_count, total) for progress.
+        on_module_result: Optional callback(module_index, LLMResult) for incremental save.
 
     Returns:
         List of (module_index, LLMResult) ordered by module_index.
+        May be shorter than plan.modules if some modules failed.
     """
     plan_context = _build_plan_context(plan)
     semaphore = asyncio.Semaphore(MAX_CONCURRENT)
@@ -203,32 +211,56 @@ async def run_specialist(
     ]
 
     results = []
+    failed_modules = []
     completed = 0
     total = len(tasks)
 
     # Wrap in asyncio.Task for cancellation support
     pending_tasks = [asyncio.ensure_future(t) for t in tasks]
 
-    # Use as_completed for progress tracking + error cancellation
-    try:
-        for coro in asyncio.as_completed(pending_tasks):
+    # Use as_completed — tolerate individual failures
+    for coro in asyncio.as_completed(pending_tasks):
+        try:
             idx, result = await coro
             results.append((idx, result))
             completed += 1
+
+            # Incremental save callback
+            if on_module_result:
+                ret = on_module_result(idx, result)
+                if asyncio.iscoroutine(ret):
+                    await ret
+
             if on_module_complete:
-                # Support both sync and async callbacks
                 ret = on_module_complete(completed, total)
                 if asyncio.iscoroutine(ret):
                     await ret
             logger.info("Specialist progress: %d/%d modules", completed, total)
-    except Exception:
-        # Cancel remaining tasks to avoid wasting LLM tokens
-        for t in pending_tasks:
-            if not t.done():
-                t.cancel()
-        # Wait for cancellation to propagate
-        await asyncio.gather(*pending_tasks, return_exceptions=True)
-        raise
+
+        except Exception as e:
+            completed += 1
+            failed_modules.append(str(e))
+            logger.error(
+                "Specialist: module failed (%d/%d): %s",
+                completed, total, e,
+            )
+            if on_module_complete:
+                ret = on_module_complete(completed, total)
+                if asyncio.iscoroutine(ret):
+                    await ret
+
+    if failed_modules:
+        logger.warning(
+            "Specialist: %d/%d modules failed: %s",
+            len(failed_modules), total,
+            "; ".join(failed_modules[:3]),
+        )
+
+    if not results:
+        raise RuntimeError(
+            f"All {total} specialist modules failed. "
+            f"First error: {failed_modules[0] if failed_modules else 'unknown'}"
+        )
 
     # Sort by module index
     results.sort(key=lambda x: x[0])

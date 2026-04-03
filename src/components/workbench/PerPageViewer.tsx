@@ -418,7 +418,7 @@ export default function PerPageViewer({ pdfSource, lectureMarkdown, title }: Per
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.15 }}
-                className="shadow-lg"
+                className="border border-border-warm"
               >
                 <PdfPageCanvas doc={doc} pageNum={currentPage} scale={1.8} />
               </motion.div>

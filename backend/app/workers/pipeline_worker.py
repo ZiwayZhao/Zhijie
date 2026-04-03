@@ -265,18 +265,10 @@ async def _run_pipeline_async(task_id_str: str):
                         {"completed": completed_count, "total": len(db_modules)},
                     )
 
-                spec_results = await run_specialist(
-                    parsed=parsed,
-                    plan=plan,
-                    llm=llm,
-                    run_id=run_id,
-                    on_module_complete=on_module_done,
-                )
-
-                # Save specialist outputs
-                for idx, spec_llm_result in spec_results:
+                async def on_module_result(idx: int, spec_llm_result):
+                    """Save each specialist output immediately on completion."""
                     if idx in existing_specialists:
-                        continue
+                        return
                     spec: SpecialistResult = spec_llm_result.data
                     db_module = db_modules[idx]
 
@@ -302,8 +294,18 @@ async def _run_pipeline_async(task_id_str: str):
                         latency_ms=spec_llm_result.latency_ms,
                         run_id=spec_llm_result.run_id,
                     ))
+                    # Commit immediately so partial results survive failures
+                    await session.commit()
+                    logger.info("Specialist output saved for module %d (%s)", idx, db_module.name)
 
-                await session.commit()
+                spec_results = await run_specialist(
+                    parsed=parsed,
+                    plan=plan,
+                    llm=llm,
+                    run_id=run_id,
+                    on_module_complete=on_module_done,
+                    on_module_result=on_module_result,
+                )
 
             # ── Phase 3.5: KNOWLEDGE CARDS ────────────────────
             await _update_task(session, task_id, phase="knowledge-cards", progress=0.82)

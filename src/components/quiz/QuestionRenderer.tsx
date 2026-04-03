@@ -68,7 +68,7 @@ function MCQCard({ question, index, total, onAnswer }: {
 
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: index * 0.05 }} className="border border-border-warm rounded-lg p-5 bg-bg-card">
+      transition={{ delay: index * 0.05 }} className="border border-border-warm rounded-sm p-5 bg-bg-card">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <span className="text-xs text-text-muted font-mono">{index + 1}/{total}</span>
@@ -144,7 +144,7 @@ export default function QuestionRenderer({ question, index, total, onAnswer }: Q
       return <CalculationCard question={question} index={index} total={total} onAnswer={onAnswer} />
     default:
       return (
-        <div className="border border-border-warm rounded-lg p-5 bg-bg-card text-sm text-text-muted">
+        <div className="border border-border-warm rounded-sm p-5 bg-bg-card text-sm text-text-muted">
           不支持的题目类型
         </div>
       )

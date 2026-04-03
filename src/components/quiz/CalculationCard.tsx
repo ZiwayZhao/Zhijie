@@ -84,7 +84,7 @@ export default function CalculationCard({ question, index, total, onAnswer }: Ca
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: index * 0.05 }}
-      className="border border-border-warm rounded-lg p-5 bg-bg-card"
+      className="border border-border-warm rounded-sm p-5 bg-bg-card"
     >
       {/* Header */}
       <div className="flex items-center justify-between mb-3">

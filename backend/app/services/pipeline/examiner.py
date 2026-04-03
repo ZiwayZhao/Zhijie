@@ -5,6 +5,7 @@ Output: 8-12 MCQ questions with explanations and source tracing
 """
 
 import logging
+import re
 from collections import Counter
 
 from pydantic import BaseModel, Field
@@ -366,6 +367,62 @@ def extract_formulas_and_examples(markdown: str) -> str:
     return joined[-2000:] if len(joined) > 2000 else joined
 
 
+# ── Deduplication helpers ────────────────────────────────────────
+
+_PUNCT_RE = re.compile(r'[\s\u3000,，.。!！?？:：;；、()（）【】\[\]{}""\'\"]+')
+
+
+def _char_ngrams(text: str, n: int = 3) -> set[str]:
+    """Return the set of character n-grams from *text* (punctuation/spaces stripped)."""
+    cleaned = _PUNCT_RE.sub('', text).lower()
+    if len(cleaned) < n:
+        return {cleaned} if cleaned else set()
+    return {cleaned[i:i + n] for i in range(len(cleaned) - n + 1)}
+
+
+def _jaccard_similarity(a: set, b: set) -> float:
+    if not a or not b:
+        return 0.0
+    return len(a & b) / len(a | b)
+
+
+def _deduplicate_questions(
+    new_questions: list["QuestionItem"],
+    existing_questions: list["QuestionItem"],
+    threshold: float = 0.6,
+) -> list["QuestionItem"]:
+    """Remove questions from *new_questions* whose stem is too similar to any
+    question already in *existing_questions* or to an earlier item in the same
+    batch.  Similarity is measured via Jaccard on character 3-grams.
+
+    Returns the de-duplicated subset of *new_questions*.
+    """
+    existing_ngrams = [_char_ngrams(q.question) for q in existing_questions]
+    kept: list["QuestionItem"] = []
+    kept_ngrams: list[set[str]] = []
+
+    for q in new_questions:
+        q_ng = _char_ngrams(q.question)
+        is_dup = False
+        for eng in existing_ngrams:
+            if _jaccard_similarity(q_ng, eng) > threshold:
+                is_dup = True
+                break
+        if not is_dup:
+            for kng in kept_ngrams:
+                if _jaccard_similarity(q_ng, kng) > threshold:
+                    is_dup = True
+                    break
+        if not is_dup:
+            kept.append(q)
+            kept_ngrams.append(q_ng)
+
+    removed = len(new_questions) - len(kept)
+    if removed:
+        logger.info("Examiner dedup: removed %d duplicate questions out of %d", removed, len(new_questions))
+    return kept
+
+
 # ── Iterative multi-round question generation ────────────────────
 
 
@@ -425,13 +482,16 @@ async def run_examiner_v2_iterative(
         )
 
     for round_num in range(rounds):
-        # Build dedup context from previous questions
+        # Build dedup context from previous questions — include stems and
+        # covered knowledge points so the LLM avoids repeating them.
         dedup_context = ""
         if all_questions:
-            dedup_context = "以下题目已出过，请出不同角度和知识点的新题：\n"
-            dedup_context += "\n".join(
-                f"- {q.question[:80]}" for q in all_questions[:30]
+            dedup_context = (
+                "## 已出题目（严禁重复相同或相似的考点和题干）\n"
+                "请从不同角度、不同知识点出题。每个模块至少覆盖1题。\n\n"
             )
+            for i, q in enumerate(all_questions[:40], 1):
+                dedup_context += f"{i}. [{q.source_module_name}] {q.question[:100]}\n"
 
         result = await run_examiner_v2(
             plan, specialist_results, llm, run_id,
@@ -439,15 +499,20 @@ async def run_examiner_v2_iterative(
             dedup_context=dedup_context,
         )
         last_result = result
-        all_questions.extend(result.data.questions)
         total_input_tokens += result.input_tokens
         total_output_tokens += result.output_tokens
         total_latency += result.latency_ms
 
+        # Deduplicate new questions against all previously accepted ones
+        new_questions = _deduplicate_questions(
+            result.data.questions, all_questions, threshold=0.6,
+        )
+        all_questions.extend(new_questions)
+
         logger.info(
-            "Examiner iterative round %d/%d: +%d questions (total %d)",
+            "Examiner iterative round %d/%d: +%d questions after dedup (total %d)",
             round_num + 1, rounds,
-            len(result.data.questions), len(all_questions),
+            len(new_questions), len(all_questions),
         )
 
         # Enforce hard cap to prevent runaway generation

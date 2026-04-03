@@ -60,13 +60,13 @@ export default function TrueFalseCard({ question, index, total, onAnswer }: True
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: index * 0.05 }}
-      className="border border-border-warm rounded-lg p-5 bg-bg-card"
+      className="border border-border-warm rounded-sm p-5 bg-bg-card"
     >
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <span className="text-xs text-text-muted font-mono">{index + 1}/{total}</span>
-          <span className="text-[10px] px-1.5 py-0.5 rounded border border-violet-200 bg-violet-50 text-violet-700 font-body">判断</span>
+          <span className="text-[10px] px-1.5 py-0.5 rounded border border-amber-200 bg-amber-50 text-amber-700 font-body">判断</span>
         </div>
         <div className="flex items-center gap-2">
           <span className="text-[10px] text-text-muted font-mono">{question.points}分</span>
