@@ -5,7 +5,7 @@
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Send, Loader2, RotateCcw, BookOpen, Compass } from 'lucide-react'
+import { Send, Loader2, RotateCcw } from 'lucide-react'
 import { useTutorSession } from '@/hooks/useTutorSession'
 import type { TutorPhase } from '@/hooks/useTutorSession'
 import TutorMessage from '@/components/tutor/TutorMessage'

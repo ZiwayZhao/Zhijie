@@ -137,6 +137,7 @@ export default function PdfAnnotator({ pdfUrl, materialId }: PdfAnnotatorProps) 
     [materialId, selectedColor],
   )
 
+  // @ts-expect-error -- kept for future use (delete highlight from annotator)
   const deleteHighlight = useCallback(
     (id: string) => {
       setHighlights((prev) => {
