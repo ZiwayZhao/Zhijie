@@ -10,6 +10,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkMath from 'remark-math'
 import remarkGfm from 'remark-gfm'
 import rehypeKatex from 'rehype-katex'
+import { perPageMdComponents } from '@/components/ui/MarkdownComponents'
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -167,63 +168,6 @@ function PdfPageCanvas({
       style={{ maxHeight: 'calc(100vh - 140px)' }}
     />
   )
-}
-
-/* ------------------------------------------------------------------ */
-/*  Markdown components (Editorial Academic design system)             */
-/* ------------------------------------------------------------------ */
-
-const mdComponents = {
-  h1: ({ children, ...p }: React.ComponentPropsWithoutRef<'h1'>) => (
-    <h1 className="font-heading text-2xl text-text-main mt-6 mb-3 pb-2 border-b border-border-warm" {...p}>{children}</h1>
-  ),
-  h2: ({ children, ...p }: React.ComponentPropsWithoutRef<'h2'>) => (
-    <h2 className="font-heading text-xl text-text-main mt-6 mb-3 pl-3 border-l-3 border-l-red-primary" {...p}>{children}</h2>
-  ),
-  h3: ({ children, ...p }: React.ComponentPropsWithoutRef<'h3'>) => (
-    <h3 className="font-heading text-lg text-text-main mt-5 mb-2" {...p}>{children}</h3>
-  ),
-  h4: ({ children, ...p }: React.ComponentPropsWithoutRef<'h4'>) => (
-    <h4 className="font-heading text-base font-semibold text-text-main mt-4 mb-1.5" {...p}>{children}</h4>
-  ),
-  p: ({ children, ...p }: React.ComponentPropsWithoutRef<'p'>) => (
-    <p className="text-[14px] text-text-body leading-relaxed mb-3" {...p}>{children}</p>
-  ),
-  ul: ({ children, ...p }: React.ComponentPropsWithoutRef<'ul'>) => (
-    <ul className="list-disc pl-5 space-y-1 text-[14px] text-text-body mb-3" {...p}>{children}</ul>
-  ),
-  ol: ({ children, ...p }: React.ComponentPropsWithoutRef<'ol'>) => (
-    <ol className="list-decimal pl-5 space-y-1 text-[14px] text-text-body mb-3" {...p}>{children}</ol>
-  ),
-  blockquote: ({ children, ...p }: React.ComponentPropsWithoutRef<'blockquote'>) => (
-    <blockquote className="border-l-3 border-l-red-primary bg-bg-accent pl-3 py-2 my-3 italic text-text-body text-[13px]" {...p}>{children}</blockquote>
-  ),
-  table: ({ children, ...p }: React.ComponentPropsWithoutRef<'table'>) => (
-    <div className="overflow-x-auto my-3">
-      <table className="w-full text-[13px] border border-border-warm" {...p}>{children}</table>
-    </div>
-  ),
-  th: ({ children, ...p }: React.ComponentPropsWithoutRef<'th'>) => (
-    <th className="px-2 py-1.5 text-left font-medium text-text-main bg-bg-accent border border-border-warm text-[13px]" {...p}>{children}</th>
-  ),
-  td: ({ children, ...p }: React.ComponentPropsWithoutRef<'td'>) => (
-    <td className="px-2 py-1.5 text-text-body border border-border-warm text-[13px]" {...p}>{children}</td>
-  ),
-  code: ({ children, className, ...p }: React.ComponentPropsWithoutRef<'code'> & { className?: string }) => {
-    if (className?.startsWith('language-')) {
-      return <code className="block bg-[#1a1a1a] text-[#e5e5e5] p-3 rounded-md overflow-x-auto text-[13px] font-mono my-3" {...p}>{children}</code>
-    }
-    return <code className="px-1 py-0.5 text-[13px] bg-bg-accent text-red-primary border border-border-warm rounded-sm font-mono" {...p}>{children}</code>
-  },
-  pre: ({ children, ...p }: React.ComponentPropsWithoutRef<'pre'>) => (
-    <pre className="my-3" {...p}>{children}</pre>
-  ),
-  strong: ({ children, ...p }: React.ComponentPropsWithoutRef<'strong'>) => (
-    <strong className="font-semibold text-text-main" {...p}>{children}</strong>
-  ),
-  hr: (p: React.ComponentPropsWithoutRef<'hr'>) => (
-    <hr className="border-t border-border-warm my-4" {...p} />
-  ),
 }
 
 /* ------------------------------------------------------------------ */
@@ -448,7 +392,7 @@ export default function PerPageViewer({ pdfSource, lectureMarkdown, title }: Per
                 <ReactMarkdown
                   remarkPlugins={[remarkMath, remarkGfm]}
                   rehypePlugins={[rehypeKatex]}
-                  components={mdComponents}
+                  components={perPageMdComponents}
                 >
                   {fixMarkdown(currentSection.content)}
                 </ReactMarkdown>

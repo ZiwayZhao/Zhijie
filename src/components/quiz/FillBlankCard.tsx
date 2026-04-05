@@ -119,7 +119,7 @@ export default function FillBlankCard({ question, index, total, onAnswer }: Fill
         <button
           onClick={handleSubmit}
           disabled={inputs.some(v => !v.trim())}
-          className="px-4 py-1.5 text-xs font-body text-white bg-red-primary rounded-md
+          className="px-4 py-1.5 text-xs font-body text-white bg-red-primary rounded-sm
                      hover:bg-red-dark transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
           提交答案

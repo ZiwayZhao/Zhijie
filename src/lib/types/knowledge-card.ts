@@ -9,7 +9,7 @@ export interface SymbolDef {
 
 export interface KnowledgeCard {
   title: string
-  card_type: 'formula' | 'comparison' | 'definition' | 'procedure'
+  card_type: 'formula' | 'comparison' | 'definition' | 'procedure' | 'theorem' | 'example' | 'pitfall' | 'method'
   content_markdown: string
   symbols: SymbolDef[] | null
   related_modules: string[]

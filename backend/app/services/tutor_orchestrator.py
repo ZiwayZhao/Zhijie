@@ -51,8 +51,8 @@ logger = logging.getLogger(__name__)
 # ── Model Config ─────────────────────────────────────────────────
 
 PLAN_MODEL = "z-ai/glm-4.7-flash"  # Free, fast — good for planning
-CHAT_MODEL = "z-ai/glm-5-turbo-20260315"  # Quality dialogue
-FALLBACK_CHAT_MODEL = "z-ai/glm-4.7-flash"  # Fallback when primary overloaded
+CHAT_MODEL = "glm-4.7"  # Quality dialogue
+FALLBACK_CHAT_MODEL = "glm-4-flash"  # Free fallback
 
 MAX_TOOL_CALLS_PER_STEP = 2
 MAX_LOOP_ITERATIONS = 3  # Safety cap for multi-step plans

@@ -90,7 +90,7 @@ function MCQCard({ question, index, total, onAnswer }: {
           const letter = String.fromCharCode(65 + i)
           return (
             <button key={i} type="button" onClick={() => handleSelect(i)} disabled={answered}
-              className={`w-full flex items-start gap-3 p-3 rounded-md border text-left transition-colors
+              className={`w-full flex items-start gap-3 p-3 rounded-sm border text-left transition-colors
                 ${borderMap[state]} ${answered ? 'cursor-default' : 'cursor-pointer'}`}>
               <span className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-mono border
                 ${state === 'correct' ? 'bg-emerald-500 text-white border-emerald-500'

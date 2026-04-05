@@ -22,7 +22,10 @@ class SymbolDef(BaseModel):
 class KnowledgeCard(BaseModel):
     """A single structured knowledge card."""
     title: str = Field(description="Card title, e.g. 'GRACE Hash Join Cost Formula'")
-    card_type: Literal["formula", "comparison", "definition", "procedure"]
+    card_type: Literal[
+        "formula", "comparison", "definition", "procedure",
+        "theorem", "example", "pitfall", "method",
+    ]
     content_markdown: str = Field(description="Card body in markdown with LaTeX")
     symbols: list[SymbolDef] | None = Field(
         default=None,

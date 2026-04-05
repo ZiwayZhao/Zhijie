@@ -14,7 +14,7 @@ from app.services.llm_client import LLMClient, LLMResult
 logger = logging.getLogger(__name__)
 
 PROMPT_VERSION = "cards_v1"
-MODEL = "hunyuan-turbos"
+MODEL = "glm-4.7"
 
 
 # ── Lightweight input DTO ────────────────────────────────────────
@@ -33,24 +33,45 @@ class KnowledgeCardModuleInput(BaseModel):
 SYSTEM_PROMPT = """\
 你是一位学术教材编辑，专门制作知识卡片。根据精讲内容生成结构化知识卡片。
 
-知识卡片类型（每种至少生成1张，总计6-15张）：
+知识卡片类型（8种，尽可能覆盖每种类型，总计12-20张）：
 
-1. **formula（公式卡）** — 用于需要记忆的公式
-   - content_markdown: 居中显示主公式（$$...$$），下方列出使用条件和注意事项
-   - symbols: 必填，每个变量一条
-   - 示例标题: "Block Nested Loop Join 代价公式"
-
-2. **comparison（对比卡）** — 用于容易混淆的概念
-   - content_markdown: 用表格呈现 "错误做法/理解" vs "正确做法/理解" vs "混淆原因"
-   - 示例标题: "聚簇索引 vs 非聚簇索引代价"
-
-3. **definition（定义卡）** — 用于关键术语
+1. **definition（定义卡）** — 关键术语
    - content_markdown: 严格定义 + 直观解释 + 使用场景
-   - 示例标题: "选择率 (Selectivity)"
+   - 示例: "选择率 (Selectivity)"
 
-4. **procedure（流程卡）** — 用于多步骤过程
+2. **theorem（定理卡）** — 重要定理/引理/性质
+   - content_markdown: 定理声明（LaTeX）+ 证明思路/关键步骤 + 适用条件
+   - 示例: "Church-Turing 论题"
+
+3. **formula（公式卡）** — 需要记忆的公式
+   - content_markdown: 居中主公式（$$...$$）+ 使用条件和注意事项
+   - symbols: 必填，每个变量一条
+   - 示例: "Block Nested Loop Join 代价公式"
+
+4. **example（例题卡）** — 典型例题
+   - content_markdown: 题目 + 分步解题过程 + 变式提示
+   - 示例: "构造识别语言 L 的图灵机"
+
+5. **comparison（对比卡）** — 容易混淆的概念
+   - content_markdown: 表格呈现差异（维度 | 概念A | 概念B）
+   - 示例: "图灵可判定 vs 图灵可识别"
+
+6. **pitfall（陷阱卡）** — 常见错误
+   - content_markdown: 错误做法 + 正确做法 + 记忆口诀/助记
+   - 示例: "非确定TM≠并行计算"
+
+7. **method（方法卡）** — 解题方法/算法策略
+   - content_markdown: 方法名称 + 适用场景 + 步骤概要 + 复杂度
+   - 示例: "对角化论证法"
+
+8. **procedure（流程卡）** — 多步骤过程
    - content_markdown: 编号步骤 + 每步简要说明
-   - 示例标题: "GRACE Hash Join 执行流程"
+   - 示例: "NTM→DTM 等价构造"
+
+难度星级分布要求：
+- 1-2星（基础）：至少3张，覆盖核心定义和基本概念
+- 3星（中等）：4-6张
+- 4-5星（进阶）：3-5张，覆盖复杂定理和综合应用
 
 额外产出：
 - formula_sheet_markdown: 将所有模块的关键公式汇总到一页，按模块分节，\

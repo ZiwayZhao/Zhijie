@@ -41,7 +41,7 @@ def _fix_double_serialized(data: dict) -> dict:
     for key, value in data.items():
         if isinstance(value, str) and value.strip().startswith(("[", "{")):
             try:
-                parsed = json.loads(value)
+                parsed = json.loads(value, strict=False)
                 if isinstance(parsed, (list, dict)):
                     logger.info("Fixed double-serialized field: %s", key)
                     fixed[key] = parsed
@@ -253,7 +253,7 @@ class LLMClient:
                     lines = [l for l in lines if not l.strip().startswith("```")]
                     text = "\n".join(lines)
 
-                raw_args = json.loads(text)
+                raw_args = json.loads(text, strict=False)
                 raw_args = _fix_double_serialized(raw_args)
                 parsed = response_schema.model_validate(raw_args)
 
@@ -387,8 +387,9 @@ class LLMClient:
                         f"No function call named '{schema_name}' in response"
                     )
 
-                # Parse JSON arguments
-                raw_args = json.loads(tool_call.function.arguments)
+                # Parse JSON arguments (strict=False tolerates unescaped control chars
+                # returned by some providers like hunyuan-turbos)
+                raw_args = json.loads(tool_call.function.arguments, strict=False)
                 logger.info("Parsed args keys: %s", list(raw_args.keys()))
 
                 # Fix double-serialized fields (OpenRouter sometimes returns

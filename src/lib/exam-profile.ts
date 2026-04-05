@@ -24,6 +24,7 @@ export interface ExamProfile {
   total_points: number
   question_distribution: QuestionTypeDistribution[]
   source: 'default' | 'user_input' | 'exam_analysis'
+  analyzed_exam_s3_key?: string
 }
 
 /* ------------------------------------------------------------------ */

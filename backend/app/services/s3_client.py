@@ -106,6 +106,24 @@ def head_object(s3_key: str) -> dict:
     return client.head_object(Bucket=settings.s3_bucket_name, Key=s3_key)
 
 
+def _rewrite_presigned_url(url: str) -> str:
+    """Rewrite internal MinIO URL to public proxy URL if S3_PUBLIC_URL_PREFIX is set.
+
+    When using nginx reverse proxy for MinIO, presigned URLs are generated
+    with the internal endpoint (minio:9000) for correct signature, then
+    rewritten to the public proxy URL. nginx passes Host: minio:9000 to
+    MinIO so signature verification still passes.
+    """
+    prefix = settings.s3_public_url_prefix
+    if not prefix:
+        return url
+    # Replace http://minio:9000/ with the public prefix
+    internal = settings.s3_endpoint_url.rstrip("/") + "/"
+    if url.startswith(internal):
+        return prefix.rstrip("/") + "/" + url[len(internal):]
+    return url
+
+
 def create_presigned_upload_url(
     s3_key: str,
     content_type: str,
@@ -119,7 +137,7 @@ def create_presigned_upload_url(
     Actual size enforcement is in confirm_upload via head_object.
     """
     client = _get_public_s3_client()
-    return client.generate_presigned_url(
+    url = client.generate_presigned_url(
         "put_object",
         Params={
             "Bucket": settings.s3_bucket_name,
@@ -129,6 +147,7 @@ def create_presigned_upload_url(
         },
         ExpiresIn=expires_in,
     )
+    return _rewrite_presigned_url(url)
 
 
 def create_presigned_download_url(
@@ -140,7 +159,7 @@ def create_presigned_download_url(
     Uses the public S3 client so URLs are accessible from the browser.
     """
     client = _get_public_s3_client()
-    return client.generate_presigned_url(
+    url = client.generate_presigned_url(
         "get_object",
         Params={
             "Bucket": settings.s3_bucket_name,
@@ -148,6 +167,7 @@ def create_presigned_download_url(
         },
         ExpiresIn=expires_in,
     )
+    return _rewrite_presigned_url(url)
 
 
 def delete_s3_object(s3_key: str) -> bool:

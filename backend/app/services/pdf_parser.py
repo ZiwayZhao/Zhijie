@@ -144,7 +144,7 @@ Extract ALL content from this page image as structured Markdown:
 
 Be EXHAUSTIVE — do not skip ANY visible content. Output only the extracted markdown, no preamble."""
 
-VISION_MODEL = "anthropic/claude-sonnet-4.5"
+VISION_MODEL = "hunyuan-turbos"
 MAX_VISION_CONCURRENT = 3
 
 
@@ -156,10 +156,10 @@ async def _extract_page_via_vision(
     """Extract content from a single page image using Claude Vision."""
     from openai import AsyncOpenAI
 
-    client = AsyncOpenAI(
-        api_key=settings.openrouter_api_key,
-        base_url="https://openrouter.ai/api/v1",
-    )
+    # Use user-configured LLM endpoint; fall back to OpenRouter
+    api_key = settings.llm_api_key or settings.openrouter_api_key
+    base_url = settings.llm_base_url or "https://openrouter.ai/api/v1"
+    client = AsyncOpenAI(api_key=api_key, base_url=base_url)
 
     async with semaphore:
         logger.info("Vision extracting page %d...", page_num)

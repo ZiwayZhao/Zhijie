@@ -113,7 +113,7 @@ function ScoreSummary({
           type="button"
           onClick={onRetry}
           className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-body text-text-muted
-                     border border-border-warm rounded-md hover:border-red-primary/40 transition-colors"
+                     border border-border-warm rounded-sm hover:border-red-primary/40 transition-colors"
         >
           <RotateCcw size={12} />
           重做
@@ -123,7 +123,7 @@ function ScoreSummary({
             type="button"
             onClick={onGenerateFlashcards}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-body text-white
-                       bg-red-primary rounded-md hover:bg-red-dark transition-colors"
+                       bg-red-primary rounded-sm hover:bg-red-dark transition-colors"
           >
             生成闪卡
             <ChevronRight size={12} />

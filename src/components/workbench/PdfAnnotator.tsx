@@ -13,7 +13,13 @@ import 'react-pdf-highlighter-extended/dist/esm/style/TextHighlight.css'
 import 'react-pdf-highlighter-extended/dist/esm/style/AreaHighlight.css'
 import 'react-pdf-highlighter-extended/dist/esm/style/MouseSelection.css'
 import { GlobalWorkerOptions, getDocument, type PDFDocumentProxy } from 'pdfjs-dist'
-import { Highlighter, MessageSquare, Trash2, X, Loader2 } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
+import {
+  dispatchHighlightCreated,
+  dispatchHighlightDeleted,
+  onHighlightDeleted,
+  onHighlightScrollTo,
+} from '@/lib/highlight-events'
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
 /* ------------------------------------------------------------------ */
@@ -51,7 +57,7 @@ function saveHighlights(id: string, list: CommentedHighlight[]) {
   localStorage.setItem(STORAGE_KEYS.HIGHLIGHTS(id), JSON.stringify(list))
   // Debounced fire-and-forget backend sync (2s coalesce)
   import('@/lib/sync-service').then(({ debouncedSyncAnnotationsUp }) => {
-    debouncedSyncAnnotationsUp(id, list as Array<{ id: string; [key: string]: unknown }>)
+    debouncedSyncAnnotationsUp(id, list as unknown as Array<{ id: string; [key: string]: unknown }>)
   })
 }
 
@@ -110,7 +116,6 @@ export default function PdfAnnotator({ pdfUrl, materialId }: PdfAnnotatorProps) 
     loadHighlights(materialId),
   )
   const [selectedColor, setSelectedColor] = useState(COLORS[0])
-  const [showSidebar, setShowSidebar] = useState(true)
   const utilsRef = useRef<PdfHighlighterUtils | null>(null)
 
   const addHighlight = useCallback(
@@ -127,6 +132,7 @@ export default function PdfAnnotator({ pdfUrl, materialId }: PdfAnnotatorProps) 
         saveHighlights(materialId, next)
         return next
       })
+      dispatchHighlightCreated(materialId, h)
     },
     [materialId, selectedColor],
   )
@@ -138,40 +144,56 @@ export default function PdfAnnotator({ pdfUrl, materialId }: PdfAnnotatorProps) 
         saveHighlights(materialId, next)
         return next
       })
+      dispatchHighlightDeleted(materialId, id)
     },
     [materialId],
   )
 
-  const scrollTo = useCallback((h: CommentedHighlight) => {
-    utilsRef.current?.scrollToHighlight(h)
-  }, [])
+  // Listen for external delete requests (from NotesPanel)
+  useEffect(() => {
+    return onHighlightDeleted(({ materialId: mid, highlightId }) => {
+      if (mid !== materialId) return
+      setHighlights((prev) => {
+        const next = prev.filter((h) => h.id !== highlightId)
+        saveHighlights(materialId, next)
+        return next
+      })
+    })
+  }, [materialId])
+
+  // Listen for scroll-to requests (from NotesPanel)
+  useEffect(() => {
+    return onHighlightScrollTo(({ materialId: mid, highlightId }) => {
+      if (mid !== materialId) return
+      const target = highlights.find((h) => h.id === highlightId)
+      if (target) utilsRef.current?.scrollToHighlight(target)
+    })
+  }, [materialId, highlights])
 
   return (
-    <div className="flex rounded-md overflow-hidden border border-border-warm" style={{ height: '80vh' }}>
+    <div className="flex rounded-sm overflow-hidden border border-border-warm" style={{ height: '80vh' }}>
       {/* PDF viewer area */}
       <div className="flex-1 relative min-w-0">
         {/* Color toolbar */}
-        <div className="absolute top-3 right-3 z-10 flex items-center gap-1.5 bg-bg-card/95 backdrop-blur border border-border-warm rounded-md px-2 py-1.5">
+        <div className="absolute top-2 right-2 z-10 flex items-center gap-1 bg-bg-card/90 backdrop-blur border border-border-warm rounded-sm px-1.5 py-1 opacity-60 hover:opacity-100 transition-opacity">
           {COLORS.map((c) => (
             <button
               key={c}
               onClick={() => setSelectedColor(c)}
-              className="w-5 h-5 rounded-full border-2 transition-all"
+              className="w-4 h-4 rounded-full border-2 transition-all"
               style={{
                 backgroundColor: c,
                 borderColor: selectedColor === c ? '#1A1A1A' : 'transparent',
-                transform: selectedColor === c ? 'scale(1.15)' : 'scale(1)',
+                transform: selectedColor === c ? 'scale(1.1)' : 'scale(1)',
               }}
             />
           ))}
-          <div className="w-px h-4 bg-border-warm mx-1" />
-          <button
-            onClick={() => setShowSidebar((v) => !v)}
-            className="p-1 rounded hover:bg-bg-accent transition-colors"
-            title={showSidebar ? '隐藏批注' : '显示批注'}
-          >
-            <MessageSquare size={14} className="text-text-muted" />
-          </button>
+          {highlights.length > 0 && (
+            <>
+              <div className="w-px h-3 bg-border-warm mx-0.5" />
+              <span className="text-[10px] text-text-muted tabular-nums">{highlights.length}</span>
+            </>
+          )}
         </div>
 
         {/* PDF.js viewer — custom loader to fix StrictMode race condition */}
@@ -201,66 +223,6 @@ export default function PdfAnnotator({ pdfUrl, materialId }: PdfAnnotatorProps) 
         )}
       </div>
 
-      {/* Annotation sidebar */}
-      {showSidebar && (
-        <div className="w-[250px] shrink-0 border-l border-border-warm bg-bg-card overflow-y-auto">
-          <div className="p-3 border-b border-border-warm flex items-center justify-between sticky top-0 bg-bg-card z-10">
-            <h3 className="text-sm font-medium text-text-main flex items-center gap-1.5">
-              <Highlighter size={14} className="text-red-primary" />
-              批注 ({highlights.length})
-            </h3>
-            <button onClick={() => setShowSidebar(false)} className="p-1 hover:bg-bg-accent rounded">
-              <X size={14} className="text-text-muted" />
-            </button>
-          </div>
-
-          {highlights.length === 0 ? (
-            <p className="text-xs text-text-muted p-4 text-center leading-relaxed">
-              选中文本即可添加高亮
-              <br />
-              按住 Alt 拖拽可框选区域
-            </p>
-          ) : (
-            <div className="divide-y divide-border-warm">
-              {highlights.map((h) => (
-                <div
-                  key={h.id}
-                  className="p-3 hover:bg-bg-accent cursor-pointer transition-colors group"
-                  onClick={() => scrollTo(h)}
-                >
-                  <div className="flex items-start gap-2">
-                    <div
-                      className="w-1 self-stretch rounded-full shrink-0 mt-0.5"
-                      style={{ backgroundColor: h.color ?? COLORS[0] }}
-                    />
-                    <div className="flex-1 min-w-0">
-                      {h.content?.text ? (
-                        <p className="text-xs text-text-body line-clamp-3">
-                          &ldquo;{h.content.text.slice(0, 100)}&rdquo;
-                        </p>
-                      ) : (
-                        <p className="text-xs text-text-muted">区域标注</p>
-                      )}
-                      {h.comment && (
-                        <p className="text-xs text-accent-gold mt-1 italic">{h.comment}</p>
-                      )}
-                    </div>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        deleteHighlight(h.id)
-                      }}
-                      className="opacity-0 group-hover:opacity-100 p-1 hover:bg-red-primary/10 rounded transition-all"
-                    >
-                      <Trash2 size={12} className="text-red-primary" />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
     </div>
   )
 }

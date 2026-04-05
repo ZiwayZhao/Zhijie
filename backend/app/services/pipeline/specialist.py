@@ -7,8 +7,8 @@ Output: SpecialistResult — lecture Markdown, key concepts, exam traps, self-te
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
+import re
 from collections.abc import Callable
 from typing import Any
 
@@ -23,7 +23,7 @@ from app.services.s3_client import get_s3_client
 logger = logging.getLogger(__name__)
 
 PROMPT_VERSION = "spec_v1"
-MODEL = "hunyuan-turbos"
+MODEL = "glm-4.7"
 MAX_CONCURRENT = 3  # Semaphore limit to avoid rate limiting
 SINGLE_MODULE_TIMEOUT = 600  # seconds (10 min — JSON prompt fallback is slower)
 
@@ -81,6 +81,94 @@ Rules:
 11. **禁止重复其他模块内容**。你将在 course context 中看到所有模块的标题列表，只讲授当前模块范围内的内容。如果某概念属于其他模块，仅做简要引用（如"详见模块X"），不展开讲解。"""
 
 
+_EMOJI_RE = re.compile(
+    r'[\U0001F300-\U0001F9FF'
+    r'\U00002702-\U000027B0'
+    r'\U0000FE00-\U0000FE0F'
+    r'\U0000200D'
+    r'\U00002600-\U000026FF'
+    r'\U00002B50-\U00002B55'
+    r'\U0000231A-\U0000231B'
+    r'\U00002328'
+    r'\U000023CF'
+    r'\U000023E9-\U000023F3'
+    r'\U000023F8-\U000023FA'
+    r'\U0001FA70-\U0001FAFF]+',
+    re.UNICODE,
+)
+
+
+def _strip_emoji(text: str) -> str:
+    return _EMOJI_RE.sub('', text)
+
+
+def _post_validate(result: SpecialistResult, module_name: str) -> None:
+    """Post-process and validate a SpecialistResult in-place.
+
+    1. Emoji cleanup (deterministic): strips emoji from all text fields.
+    2. LaTeX count check (warning only).
+    3. Self-test question count check (warning only).
+    4. Word count check (warning only).
+    5. Summary format check (warning only).
+    """
+    # 1. Emoji cleanup — mutate in place
+    result.lecture_markdown = _strip_emoji(result.lecture_markdown)
+    result.summary = _strip_emoji(result.summary)
+    result.exam_traps = [_strip_emoji(t) for t in result.exam_traps]
+    result.key_concepts = [_strip_emoji(c) for c in result.key_concepts]
+    result.self_test_questions = [
+        SelfTestQuestion(
+            question=_strip_emoji(q.question),
+            answer=_strip_emoji(q.answer),
+        )
+        for q in result.self_test_questions
+    ]
+
+    # 2. LaTeX count check
+    md = result.lecture_markdown
+    block_count = md.count('$$') // 2  # each block formula uses $$ ... $$
+    # Inline count: total $ occurrences minus block delimiters (each $$ contributes 2 $)
+    total_dollar = md.count('$')
+    inline_count = (total_dollar - block_count * 4) // 2  # rough estimate
+    if inline_count < 3:
+        logger.warning(
+            "Specialist post-validate [%s]: fewer than 3 inline LaTeX formulas detected "
+            "(estimated %d inline). Content may be missing math notation.",
+            module_name, inline_count,
+        )
+    if block_count < 2:
+        logger.warning(
+            "Specialist post-validate [%s]: fewer than 2 block LaTeX formulas detected "
+            "(found %d). Content may be missing block equations.",
+            module_name, block_count,
+        )
+
+    # 3. Self-test question count
+    if len(result.self_test_questions) < 2:
+        logger.warning(
+            "Specialist post-validate [%s]: only %d self-test question(s) generated "
+            "(minimum 2 required).",
+            module_name, len(result.self_test_questions),
+        )
+
+    # 4. Word count
+    if len(result.lecture_markdown) < 1500:
+        logger.warning(
+            "Specialist post-validate [%s]: lecture_markdown is only %d characters "
+            "(target >= 1500). Content may be too short.",
+            module_name, len(result.lecture_markdown),
+        )
+
+    # 5. Summary format check
+    _BULLET_RE = re.compile(r'(^|\n)\s*([-*]|\d+\.)\s')
+    if _BULLET_RE.search(result.summary):
+        logger.warning(
+            "Specialist post-validate [%s]: summary appears to contain bullet/list "
+            "markers. Expected 1-2 prose sentences, not a list.",
+            module_name,
+        )
+
+
 async def _process_single_module(
     module: ModulePlan,
     module_index: int,
@@ -134,6 +222,7 @@ Source content:
             result.latency_ms,
         )
 
+        _post_validate(result.data, module.name)
         return module_index, result
 
 

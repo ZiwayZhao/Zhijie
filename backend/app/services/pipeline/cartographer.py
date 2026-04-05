@@ -15,7 +15,7 @@ from app.services.pdf_parser import ParsedPDF
 logger = logging.getLogger(__name__)
 
 PROMPT_VERSION = "cart_v1"
-MODEL = "hunyuan-turbos"
+MODEL = "glm-4.7"
 
 # ── Structured Output Schema ─────────────────────────────────────
 

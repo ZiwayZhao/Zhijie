@@ -32,8 +32,8 @@ PAGE_SEP_PATTERN = re.compile(r"^---PAGE (\d+)---$", re.MULTILINE)
 # Concurrency for vision LLM calls
 MAX_VISION_CONCURRENT = 3
 
-# Vision model for image description
-IMAGE_DESCRIPTION_MODEL = "anthropic/claude-sonnet-4.5"
+# Vision model for image description — uses user-configured LLM endpoint
+IMAGE_DESCRIPTION_MODEL = "hunyuan-turbos"
 
 IMAGE_DESCRIPTION_SYSTEM = """你是一位学术图表分析专家。请用中文详细描述这张图片的内容。
 
@@ -198,10 +198,10 @@ async def describe_image(
     if not img.local_path or not img.local_path.exists():
         return ""
 
-    client = AsyncOpenAI(
-        api_key=settings.openrouter_api_key,
-        base_url="https://openrouter.ai/api/v1",
-    )
+    # Use user-configured LLM endpoint; fall back to OpenRouter
+    api_key = settings.llm_api_key or settings.openrouter_api_key
+    base_url = settings.llm_base_url or "https://openrouter.ai/api/v1"
+    client = AsyncOpenAI(api_key=api_key, base_url=base_url)
 
     img_bytes = img.local_path.read_bytes()
     img_b64 = base64.b64encode(img_bytes).decode("ascii")

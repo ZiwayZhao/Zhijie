@@ -19,7 +19,7 @@ export interface QuizSessionResult {
   maxPoints: number
 }
 
-export function useQuizSession(courseId: string) {
+export function useQuizSession(_courseId: string) {
   const [profile, setProfile] = useState<LearningProfile>(() => loadProfile())
 
   /** Call when user finishes a QuizPanelV2 session */

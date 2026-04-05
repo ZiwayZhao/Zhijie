@@ -190,7 +190,7 @@ export async function syncStudentProfileDown(): Promise<LearningProfile | null> 
 /*  2. Flashcard Deck sync                                             */
 /* ------------------------------------------------------------------ */
 
-import type { FlashcardDeck, FlashcardNote, FlashcardCard, FlashcardReviewLog } from '@/lib/fsrs'
+import type { FlashcardDeck } from '@/lib/fsrs'
 
 /** Map ts-fsrs numeric State enum to backend string values */
 const STATE_NUM_TO_STR: Record<number, string> = {
@@ -442,8 +442,6 @@ export async function getStreamTicket(taskId: string): Promise<string | null> {
 
 import { loadProfile, saveProfile } from '@/lib/student-model'
 import { loadTodos, saveTodos } from '@/lib/agenda-engine'
-import { STORAGE_KEYS } from '@/lib/storage-keys'
-
 /**
  * Full sync on login: pull everything from backend → merge with local.
  * Strategy: backend wins for student profile (since it's the merge point).

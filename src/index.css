@@ -82,6 +82,15 @@ body {
   font-size: 1em;
 }
 
+/* Hide scrollbar utility */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
 /* Print styles — export specialist/quiz content cleanly */
 @media print {
   /* Hide app chrome */

@@ -32,6 +32,9 @@ interface TutorSidebarProps {
   courseId?: string
   /** IDs of exam/exercise materials to include as context for exam-aware answers */
   examMaterialIds?: string[]
+  /** If set, auto-send this message once (cleared after sending). Used by NotesPanel AI explain. */
+  pendingMessage?: string | null
+  onPendingMessageSent?: () => void
   onSpecialistView?: (markdown: string, moduleName: string) => void
   onQuizView?: (questions: MCQuestion[]) => void
 }
@@ -42,8 +45,10 @@ export default function TutorSidebar({
   materialId,
   moduleId,
   moduleName,
-  courseId,
+  courseId: _courseId,
   examMaterialIds,
+  pendingMessage,
+  onPendingMessageSent,
   onSpecialistView,
   onQuizView,
 }: TutorSidebarProps) {
@@ -89,6 +94,14 @@ export default function TutorSidebar({
       '帮我制定学习计划',
     ]
   }, [moduleId, moduleName])
+
+  // Handle pending message from NotesPanel AI explain
+  useEffect(() => {
+    if (pendingMessage && !isBusy) {
+      sendMessage(pendingMessage)
+      onPendingMessageSent?.()
+    }
+  }, [pendingMessage]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -140,24 +153,20 @@ export default function TutorSidebar({
   )
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="flex items-center justify-between pb-3 mb-3 border-b border-border-warm">
-        <div className="flex items-center gap-2">
-          <BookOpen size={16} strokeWidth={1.5} className="text-red-primary" />
-          <h3 className="font-heading text-sm text-text-main">AI 学习助教</h3>
-        </div>
-        {state.messages.length > 0 && (
+    <div className="flex flex-col h-full px-4 pt-3 pb-2">
+      {/* Compact header — only show reset when there are messages */}
+      {state.messages.length > 0 && (
+        <div className="flex items-center justify-end pb-1.5 mb-1.5">
           <button
             onClick={reset}
-            className="flex items-center gap-1 text-xs text-text-muted hover:text-red-primary transition-colors"
+            className="flex items-center gap-1 text-[11px] text-text-muted hover:text-red-primary transition-colors"
             title="清除对话"
           >
-            <RotateCcw size={12} strokeWidth={1.5} />
-            清除
+            <RotateCcw size={11} strokeWidth={1.5} />
+            清除对话
           </button>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Context budget bar (Wave 5) */}
       {state.contextBudget && (
@@ -190,38 +199,25 @@ export default function TutorSidebar({
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
-            className="text-center py-12 px-4"
+            className="text-center py-6 px-3"
           >
             {moduleName ? (
-              <>
-                <div className="w-8 h-8 rounded-full bg-red-primary/10 flex items-center justify-center mx-auto mb-3">
-                  <Compass size={16} strokeWidth={1.5} className="text-red-primary" />
-                </div>
-                <p className="font-heading text-base text-text-main mb-1">
-                  {moduleName}
-                </p>
-                <p className="text-xs text-text-muted leading-relaxed mb-4">
-                  选择学习方式，或输入你的问题
-                </p>
-              </>
+              <p className="text-xs text-text-muted mb-3">
+                <span className="text-text-body font-medium">{moduleName}</span> — 选择学习方式或直接提问
+              </p>
             ) : (
-              <>
-                <p className="font-heading text-lg text-text-main mb-2">
-                  有什么想了解的？
-                </p>
-                <p className="text-xs text-text-muted leading-relaxed mb-4">
-                  试试问关于课件内容的问题：
-                </p>
-              </>
+              <p className="text-xs text-text-muted mb-3">
+                试试问关于课件内容的问题：
+              </p>
             )}
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               {contextPrompts.map((hint, i) => (
                 <button
                   key={i}
                   onClick={() => {
                     sendMessage(hint)
                   }}
-                  className="block w-full text-left px-3 py-2 text-xs text-text-body
+                  className="block w-full text-left px-2.5 py-1.5 text-[12px] text-text-body leading-snug
                              border border-border-warm rounded-sm
                              hover:border-red-primary hover:text-red-primary transition-colors"
                 >

@@ -5,8 +5,11 @@
 
 import { useState, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Upload, FileUp, Check, AlertCircle, Loader2, Pencil } from 'lucide-react'
+import { Upload, FileUp, Check, AlertCircle, Loader2 } from 'lucide-react'
 import { authFetch } from '@/lib/auth-api'
+import type { ExamProfile } from '@/lib/exam-profile'
+
+export type { ExamProfile }
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8003/api'
 const AUTH_API = `${API_BASE}/v1`
@@ -14,24 +17,6 @@ const AUTH_API = `${API_BASE}/v1`
 const MAX_SIZE_MB = 20
 const MAX_SIZE_BYTES = MAX_SIZE_MB * 1024 * 1024
 const ACCEPTED = '.pdf,.png,.jpg,.jpeg,.webp'
-
-interface QuestionTypeDistribution {
-  question_type: string
-  count: number
-  points_each: number
-  total_points: number
-  percentage: number
-}
-
-export interface ExamProfile {
-  exam_date?: string | null
-  duration_minutes?: number | null
-  is_open_book?: boolean | null
-  total_points: number
-  question_distribution: QuestionTypeDistribution[]
-  source: 'default' | 'user_input' | 'exam_analysis'
-  analyzed_exam_s3_key?: string | null
-}
 
 interface ExamUploadCardProps {
   courseId: string
@@ -52,14 +37,12 @@ type Phase = 'idle' | 'uploading' | 'analyzing' | 'done' | 'error'
 
 export default function ExamUploadCard({
   courseId,
-  materialId,
   onProfileDetected,
 }: ExamUploadCardProps) {
   const [phase, setPhase] = useState<Phase>('idle')
   const [profile, setProfile] = useState<ExamProfile | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isDragging, setIsDragging] = useState(false)
-  const [editing, setEditing] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const handleFile = useCallback(
@@ -132,7 +115,6 @@ export default function ExamUploadCard({
     setPhase('idle')
     setProfile(null)
     setError(null)
-    setEditing(false)
   }, [])
 
   return (

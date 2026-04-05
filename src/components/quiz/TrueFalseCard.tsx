@@ -87,7 +87,7 @@ export default function TrueFalseCard({ question, index, total, onAnswer }: True
           type="button"
           onClick={() => handleSelect(true)}
           disabled={answered}
-          className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-md border
+          className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-sm border
             text-sm font-body transition-colors ${btnClass(true)}
             ${answered ? 'cursor-default' : 'cursor-pointer'}`}
         >
@@ -99,7 +99,7 @@ export default function TrueFalseCard({ question, index, total, onAnswer }: True
           type="button"
           onClick={() => handleSelect(false)}
           disabled={answered}
-          className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-md border
+          className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-sm border
             text-sm font-body transition-colors ${btnClass(false)}
             ${answered ? 'cursor-default' : 'cursor-pointer'}`}
         >

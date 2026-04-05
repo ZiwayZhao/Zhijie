@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, lazy, Suspense } from 'react'
 import { motion } from 'framer-motion'
-import { Upload, FileText, BookOpen, X, Loader2, MessageCircle, ChevronLeft } from 'lucide-react'
+import { Upload, FileText, BookOpen, X, Loader2, MessageCircle } from 'lucide-react'
 import PerPageViewer from '@/components/workbench/PerPageViewer'
 
 const TutorSidebar = lazy(() => import('@/components/tutor/TutorSidebar'))

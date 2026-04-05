@@ -396,7 +396,48 @@ export function useAIToolPanel({
     if (state.phase === 'complete' && state.modules.length > 0) return
 
     getLatestAnalysis(materialId).then(async (task) => {
-      if (cancelled || skipAutoDetectRef.current || !task || task.status !== 'completed') return
+      if (cancelled || skipAutoDetectRef.current || !task) return
+
+      // Running/pending task → show progress UI and subscribe to SSE
+      if (task.status === 'running' || task.status === 'pending') {
+        if (cancelled || skipAutoDetectRef.current) return
+        taskIdRef.current = task.task_id
+        dispatch({ type: 'START_PROCESSING' })
+        unsubRef.current = subscribeProgress(task.task_id, (evt: ProgressEvent) => {
+          dispatch({
+            type: 'UPDATE_PROGRESS',
+            progress: evt.progress,
+            currentStep: evt.currentStep,
+            pipelinePhase: evt.phase as PipelinePhase | undefined,
+            detail: evt.detail,
+          })
+          if (evt.status === 'completed') {
+            getAnalysisResult(task.task_id).then((result) => {
+              const mods = result.modules as DisassemblyModule[]
+              const studentProfile = loadProfile()
+              const steps = generatePlanSteps(mods, 'learn', studentProfile)
+              saveAnalysisCache(materialId, task.task_id, mods)
+              dispatch({ type: 'PROCESSING_COMPLETE', modules: mods, planSteps: steps })
+              showToast(`课件分析完成，发现 ${mods.length} 个知识模块`)
+              if (result.knowledge_cards) {
+                onKnowledgeCardsReadyRef.current?.(result.knowledge_cards)
+              } else {
+                getKnowledgeCards(task.task_id)
+                  .then((data) => { onKnowledgeCardsReadyRef.current?.(data) })
+                  .catch(() => {})
+              }
+            }).catch(() => {
+              dispatch({ type: 'PROCESSING_ERROR', errorMsg: '获取分析结果失败' })
+            })
+          }
+          if (evt.status === 'failed') {
+            dispatch({ type: 'PROCESSING_ERROR', errorMsg: evt.currentStep ?? '分析过程中出现错误' })
+          }
+        })
+        return
+      }
+
+      if (task.status !== 'completed') return
       try {
         const result = await getAnalysisResult(task.task_id)
         if (cancelled || skipAutoDetectRef.current) return
@@ -473,7 +514,7 @@ export function useAIToolPanel({
       })
     } catch (err) {
       const msg = err instanceof Error ? err.message : '启动失败'
-      // If analysis already exists, try to load existing results
+      // If analysis already exists, try to load or subscribe to progress
       if (msg.toLowerCase().includes('already') || msg.includes('已存在')) {
         try {
           const task = await getLatestAnalysis(materialId)
@@ -493,6 +534,43 @@ export function useAIToolPanel({
                 .then((data) => { onKnowledgeCardsReadyRef.current?.(data) })
                 .catch(() => {})
             }
+            return
+          }
+          // Running/pending → subscribe to progress instead of showing error
+          if (task && (task.status === 'running' || task.status === 'pending')) {
+            taskIdRef.current = task.task_id
+            // Already dispatched START_PROCESSING at top of function, keep it
+            unsubRef.current = subscribeProgress(task.task_id, (evt: ProgressEvent) => {
+              dispatch({
+                type: 'UPDATE_PROGRESS',
+                progress: evt.progress,
+                currentStep: evt.currentStep,
+                pipelinePhase: evt.phase as PipelinePhase | undefined,
+                detail: evt.detail,
+              })
+              if (evt.status === 'completed') {
+                getAnalysisResult(task.task_id).then((result) => {
+                  const mods = result.modules as DisassemblyModule[]
+                  const studentProfile = loadProfile()
+                  const steps = generatePlanSteps(mods, intent, studentProfile)
+                  saveAnalysisCache(materialId, task.task_id, mods)
+                  dispatch({ type: 'PROCESSING_COMPLETE', modules: mods, planSteps: steps })
+                  showToast(`课件分析完成，发现 ${mods.length} 个知识模块`)
+                  if (result.knowledge_cards) {
+                    onKnowledgeCardsReadyRef.current?.(result.knowledge_cards)
+                  } else {
+                    getKnowledgeCards(task.task_id)
+                      .then((data) => { onKnowledgeCardsReadyRef.current?.(data) })
+                      .catch(() => {})
+                  }
+                }).catch(() => {
+                  dispatch({ type: 'PROCESSING_ERROR', errorMsg: '获取分析结果失败' })
+                })
+              }
+              if (evt.status === 'failed') {
+                dispatch({ type: 'PROCESSING_ERROR', errorMsg: evt.currentStep ?? '分析过程中出现错误' })
+              }
+            })
             return
           }
         } catch { /* fall through to error */ }

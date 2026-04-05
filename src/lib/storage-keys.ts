@@ -34,6 +34,10 @@ export const STORAGE_KEYS = {
   HIGHLIGHTS: (materialId: string) => `zhijie_highlights_${materialId}` as const,
   HIGHLIGHTS_PREFIX: 'zhijie_highlights_',
 
+  /** Manual notes per material */
+  NOTES: (materialId: string) => `zhijie_notes_${materialId}` as const,
+  NOTES_PREFIX: 'zhijie_notes_',
+
   /** Mock data initialization guards */
   MOCK_FLASHCARDS_INIT: 'zhijie_mock_flashcards_initialized',
   MOCK_AGENDA_INIT: 'zhijie_mock_agenda_initialized',

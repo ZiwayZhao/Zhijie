@@ -16,7 +16,6 @@ import {
   Sun,
   Moon,
   Check,
-  Cpu,
   Eye,
   EyeOff,
   Loader2,

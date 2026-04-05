@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 PROMPT_VERSION = "exam_v1"
 PROMPT_VERSION_V2 = "exam_v2"
-MODEL = "hunyuan-turbos"
+MODEL = "glm-4.7"
 
 
 # ── Input DTO (lightweight, no validation constraints) ────────────
@@ -386,41 +386,185 @@ def _jaccard_similarity(a: set, b: set) -> float:
     return len(a & b) / len(a | b)
 
 
+_NUM_RE = re.compile(r'\d+\.?\d*')
+
+
+def _formula_skeleton(text: str) -> str:
+    """Replace numbers in LaTeX formulas with X for structural comparison."""
+    return _NUM_RE.sub('X', _PUNCT_RE.sub('', text).lower())
+
+
+def _question_similarity(q1: "QuestionItem", q2: "QuestionItem", threshold: float) -> bool:
+    """Check if two questions are similar, with type-specific logic."""
+    # 1. Stem similarity (universal)
+    ng1, ng2 = _char_ngrams(q1.question), _char_ngrams(q2.question)
+    stem_sim = _jaccard_similarity(ng1, ng2)
+    if stem_sim > threshold:
+        return True
+
+    # 2. For calculation: compare formula skeleton
+    if q1.question_type == "calculation" and q2.question_type == "calculation":
+        sk1, sk2 = _formula_skeleton(q1.question), _formula_skeleton(q2.question)
+        sk_ng1, sk_ng2 = _char_ngrams(sk1), _char_ngrams(sk2)
+        if _jaccard_similarity(sk_ng1, sk_ng2) > 0.7:
+            return True
+
+    # 3. For MCQ: also compare options
+    if (q1.question_type == "mcq" and q2.question_type == "mcq"
+            and q1.options and q2.options):
+        opts1 = _char_ngrams(" ".join(q1.options))
+        opts2 = _char_ngrams(" ".join(q2.options))
+        if _jaccard_similarity(opts1, opts2) > 0.6:
+            return True
+
+    return False
+
+
 def _deduplicate_questions(
     new_questions: list["QuestionItem"],
     existing_questions: list["QuestionItem"],
-    threshold: float = 0.6,
+    threshold: float = 0.45,
 ) -> list["QuestionItem"]:
     """Remove questions from *new_questions* whose stem is too similar to any
     question already in *existing_questions* or to an earlier item in the same
-    batch.  Similarity is measured via Jaccard on character 3-grams.
+    batch.  Uses type-specific similarity (stem, formula skeleton, MCQ options).
 
     Returns the de-duplicated subset of *new_questions*.
     """
-    existing_ngrams = [_char_ngrams(q.question) for q in existing_questions]
     kept: list["QuestionItem"] = []
-    kept_ngrams: list[set[str]] = []
 
     for q in new_questions:
-        q_ng = _char_ngrams(q.question)
         is_dup = False
-        for eng in existing_ngrams:
-            if _jaccard_similarity(q_ng, eng) > threshold:
+        for eq in existing_questions:
+            if _question_similarity(q, eq, threshold):
                 is_dup = True
                 break
         if not is_dup:
-            for kng in kept_ngrams:
-                if _jaccard_similarity(q_ng, kng) > threshold:
+            for kq in kept:
+                if _question_similarity(q, kq, threshold):
                     is_dup = True
                     break
         if not is_dup:
             kept.append(q)
-            kept_ngrams.append(q_ng)
 
     removed = len(new_questions) - len(kept)
     if removed:
         logger.info("Examiner dedup: removed %d duplicate questions out of %d", removed, len(new_questions))
     return kept
+
+
+# ── Coverage & distribution validators ──────────────────────────
+
+
+def _check_module_coverage(
+    questions: list["QuestionItem"],
+    plan: CartographerResult,
+) -> list[tuple[int, str, str]]:
+    """Check that each module has enough questions based on exam_weight.
+
+    Returns a list of (module_index, module_name, weight) for under-covered modules.
+    """
+    # Count questions per module — handle LLM adding "Module N:" prefix
+    raw_counts: dict[str, int] = Counter(q.source_module_name for q in questions)
+    module_q_count: dict[str, int] = {}
+    for i, m in enumerate(plan.modules):
+        count = raw_counts.get(m.name, 0)
+        # Also match variants like "Module 0: <name>" or "模块 0：<name>"
+        for raw_name, raw_c in raw_counts.items():
+            if raw_name != m.name and m.name in raw_name:
+                count += raw_c
+        module_q_count[m.name] = count
+
+    min_by_weight = {"high": 2, "medium": 1, "low": 0}
+    gaps: list[tuple[int, str, str]] = []
+
+    for i, m in enumerate(plan.modules):
+        required = min_by_weight.get(m.exam_weight, 1)
+        actual = module_q_count.get(m.name, 0)
+        if actual < required:
+            gaps.append((i, m.name, m.exam_weight))
+            logger.info(
+                "Examiner coverage gap: module '%s' (weight=%s) has %d questions, needs %d",
+                m.name, m.exam_weight, actual, required,
+            )
+
+    return gaps
+
+
+def _check_difficulty_distribution(
+    questions: list["QuestionItem"],
+) -> dict[str, int]:
+    """Check difficulty distribution and return shortfall counts.
+
+    Target: easy ≥ 30% of total * 0.7, medium ≥ 50% of total * 0.7,
+    hard ≥ 20% of total * 0.7 (with 30% tolerance).
+
+    Returns dict of {difficulty: shortfall} for any under-represented level.
+    """
+    total = len(questions)
+    if total == 0:
+        return {}
+
+    actual = Counter(q.difficulty for q in questions)
+    targets = {"easy": 0.3, "medium": 0.5, "hard": 0.2}
+    shortfalls: dict[str, int] = {}
+
+    for level, pct in targets.items():
+        min_expected = max(1, int(total * pct * 0.7))
+        if actual.get(level, 0) < min_expected:
+            shortfalls[level] = min_expected - actual.get(level, 0)
+            logger.info(
+                "Examiner difficulty gap: %s has %d, needs at least %d",
+                level, actual.get(level, 0), min_expected,
+            )
+
+    return shortfalls
+
+
+def _build_structured_dedup_context(
+    questions: list["QuestionItem"],
+    plan: CartographerResult,
+) -> str:
+    """Build a structured dedup context with module coverage stats."""
+    if not questions:
+        return ""
+
+    # Module coverage stats — handle LLM adding "Module N:" prefix
+    raw_q_count: Counter = Counter(q.source_module_name for q in questions)
+    diff_count: Counter = Counter(q.difficulty for q in questions)
+    type_count: Counter = Counter(q.question_type for q in questions)
+
+    lines = ["## 已出题统计（请参考以下信息避免重复并填补空缺）\n"]
+
+    # Module coverage table
+    lines.append("### 模块覆盖情况")
+    for i, m in enumerate(plan.modules):
+        count = raw_q_count.get(m.name, 0)
+        for raw_name, raw_c in raw_q_count.items():
+            if raw_name != m.name and m.name in raw_name:
+                count += raw_c
+        marker = " ← 请优先出题" if count == 0 else (
+            " ← 题目偏少" if (m.exam_weight == "high" and count < 2) else ""
+        )
+        lines.append(f"- {m.name} (权重={m.exam_weight}): 已有{count}题{marker}")
+
+    # Difficulty distribution
+    lines.append(f"\n### 难度分布: easy={diff_count.get('easy', 0)}, "
+                 f"medium={diff_count.get('medium', 0)}, hard={diff_count.get('hard', 0)}")
+
+    # Type distribution
+    type_summary = ", ".join(
+        f"{_QUESTION_TYPE_LABELS.get(t, t)}={c}" for t, c in type_count.items()
+    )
+    lines.append(f"### 题型分布: {type_summary}")
+
+    # Question stems (truncated)
+    lines.append("\n### 已出题干（严禁重复相同或相似的考点和题干）")
+    lines.append("请从不同角度、不同知识点出题。\n")
+    for i, q in enumerate(questions[:40], 1):
+        lines.append(f"{i}. [{q.source_module_name}|{q.difficulty}] {q.question[:80]}")
+
+    return "\n".join(lines)
 
 
 # ── Iterative multi-round question generation ────────────────────
@@ -482,16 +626,10 @@ async def run_examiner_v2_iterative(
         )
 
     for round_num in range(rounds):
-        # Build dedup context from previous questions — include stems and
-        # covered knowledge points so the LLM avoids repeating them.
-        dedup_context = ""
-        if all_questions:
-            dedup_context = (
-                "## 已出题目（严禁重复相同或相似的考点和题干）\n"
-                "请从不同角度、不同知识点出题。每个模块至少覆盖1题。\n\n"
-            )
-            for i, q in enumerate(all_questions[:40], 1):
-                dedup_context += f"{i}. [{q.source_module_name}] {q.question[:100]}\n"
+        # Build structured dedup context with module/difficulty stats
+        dedup_context = _build_structured_dedup_context(
+            all_questions, plan,
+        )
 
         result = await run_examiner_v2(
             plan, specialist_results, llm, run_id,
@@ -505,7 +643,7 @@ async def run_examiner_v2_iterative(
 
         # Deduplicate new questions against all previously accepted ones
         new_questions = _deduplicate_questions(
-            result.data.questions, all_questions, threshold=0.6,
+            result.data.questions, all_questions, threshold=0.45,
         )
         all_questions.extend(new_questions)
 
@@ -520,6 +658,59 @@ async def run_examiner_v2_iterative(
             all_questions = all_questions[:MAX_QUESTIONS_CAP]
             logger.info("Examiner: hit max cap of %d questions, stopping early", MAX_QUESTIONS_CAP)
             break
+
+    # ── Post-generation: coverage & difficulty checks ──────────
+    coverage_gaps = _check_module_coverage(all_questions, plan)
+    diff_shortfalls = _check_difficulty_distribution(all_questions)
+
+    # Supplementary round if significant gaps exist
+    if (coverage_gaps or diff_shortfalls) and len(all_questions) < MAX_QUESTIONS_CAP:
+        logger.info(
+            "Examiner: triggering supplementary round — "
+            "%d module gaps, %d difficulty shortfalls",
+            len(coverage_gaps), len(diff_shortfalls),
+        )
+
+        # Build targeted dedup context with gap instructions
+        supplement_ctx = _build_structured_dedup_context(all_questions, plan)
+        supplement_ctx += "\n\n## 补充出题指令\n"
+        if coverage_gaps:
+            gap_names = [f"{name} (权重={w})" for _, name, w in coverage_gaps]
+            supplement_ctx += f"以下模块题目不足，请优先为其出题：{', '.join(gap_names)}\n"
+        if diff_shortfalls:
+            diff_reqs = [f"{d}难度至少补{n}题" for d, n in diff_shortfalls.items()]
+            supplement_ctx += f"难度分布不均，请：{'，'.join(diff_reqs)}\n"
+
+        # Use a small profile for the supplement round
+        supp_result = await run_examiner_v2(
+            plan, specialist_results, llm, run_id,
+            exam_profile=round_profile,
+            dedup_context=supplement_ctx,
+        )
+        total_input_tokens += supp_result.input_tokens
+        total_output_tokens += supp_result.output_tokens
+        total_latency += supp_result.latency_ms
+
+        supp_new = _deduplicate_questions(
+            supp_result.data.questions, all_questions, threshold=0.45,
+        )
+        all_questions.extend(supp_new)
+        all_questions = all_questions[:MAX_QUESTIONS_CAP]
+
+        logger.info(
+            "Examiner supplementary round: +%d questions (total %d)",
+            len(supp_new), len(all_questions),
+        )
+
+    # Final stats logging
+    final_module_counts = Counter(q.source_module_name for q in all_questions)
+    final_diff_counts = Counter(q.difficulty for q in all_questions)
+    logger.info(
+        "Examiner final: %d questions, modules=%s, difficulty=%s",
+        len(all_questions),
+        dict(final_module_counts),
+        dict(final_diff_counts),
+    )
 
     return LLMResult(
         data=ExaminerResultV2(questions=all_questions),

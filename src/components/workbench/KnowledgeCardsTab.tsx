@@ -1,15 +1,50 @@
 /**
  * KnowledgeCardsTab — masonry-style layout of structured knowledge cards.
- * Each card type (formula/comparison/definition/procedure) has a distinct visual style.
+ * Card types: formula, comparison, definition, procedure, theorem, example, pitfall, method.
  * Renders markdown with LaTeX support via ReactMarkdown + remarkMath + rehypeKatex.
  */
 
+import { useState } from 'react'
 import { motion } from 'framer-motion'
 import ReactMarkdown from 'react-markdown'
 import remarkMath from 'remark-math'
 import remarkGfm from 'remark-gfm'
 import rehypeKatex from 'rehype-katex'
+import { compactMdComponents } from '@/components/ui/MarkdownComponents'
 import type { KnowledgeCard, SymbolDef } from '@/lib/types/knowledge-card'
+
+/* ---------- Type Metadata ---------- */
+
+type CardType = KnowledgeCard['card_type']
+
+const TYPE_LABELS: Record<string, string> = {
+  all:        '全部',
+  formula:    '公式',
+  comparison: '对比',
+  definition: '定义',
+  procedure:  '步骤',
+  theorem:    '定理',
+  example:    '例题',
+  pitfall:    '易错',
+  method:     '方法',
+}
+
+const TYPE_ICONS: Record<string, string> = {
+  all:        '◆',
+  formula:    '∑',
+  comparison: '⇄',
+  definition: '≝',
+  procedure:  '①',
+  theorem:    '⊢',
+  example:    '◎',
+  pitfall:    '⚠',
+  method:     '⚙',
+}
+
+const ALL_TYPES: Array<CardType | 'all'> = [
+  'all', 'formula', 'comparison', 'definition', 'procedure',
+  'theorem', 'example', 'pitfall', 'method',
+]
 
 /* ---------- Props ---------- */
 
@@ -56,66 +91,6 @@ function SymbolTable({ symbols }: { symbols: SymbolDef[] }) {
   )
 }
 
-/* ---------- Markdown renderer (shared) ---------- */
-
-const mdComponents = {
-  p: ({ children, ...props }: React.ComponentPropsWithoutRef<'p'>) => (
-    <p className="text-[15px] text-text-body leading-relaxed mb-3" {...props}>
-      {children}
-    </p>
-  ),
-  table: ({ children, ...props }: React.ComponentPropsWithoutRef<'table'>) => (
-    <div className="overflow-x-auto my-3">
-      <table className="w-full text-sm border border-border-warm" {...props}>
-        {children}
-      </table>
-    </div>
-  ),
-  th: ({ children, ...props }: React.ComponentPropsWithoutRef<'th'>) => (
-    <th
-      className="px-3 py-2 text-left font-medium text-text-main bg-bg-accent border border-border-warm"
-      {...props}
-    >
-      {children}
-    </th>
-  ),
-  td: ({ children, ...props }: React.ComponentPropsWithoutRef<'td'>) => (
-    <td className="px-3 py-2 text-text-body border border-border-warm" {...props}>
-      {children}
-    </td>
-  ),
-  code: ({
-    children,
-    className,
-    ...props
-  }: React.ComponentPropsWithoutRef<'code'> & { className?: string }) => {
-    const isBlock = className?.startsWith('language-')
-    if (isBlock) {
-      return (
-        <code
-          className="block bg-text-main text-bg-main p-4 rounded-sm overflow-x-auto text-sm font-mono my-3"
-          {...props}
-        >
-          {children}
-        </code>
-      )
-    }
-    return (
-      <code
-        className="px-1.5 py-0.5 text-sm bg-bg-accent text-red-primary border border-border-warm rounded-sm font-mono"
-        {...props}
-      >
-        {children}
-      </code>
-    )
-  },
-  strong: ({ children, ...props }: React.ComponentPropsWithoutRef<'strong'>) => (
-    <strong className="font-semibold text-text-main" {...props}>
-      {children}
-    </strong>
-  ),
-}
-
 /* ---------- Card Type Renderers ---------- */
 
 function FormulaCard({ card, index }: { card: KnowledgeCard; index: number }) {
@@ -134,7 +109,7 @@ function FormulaCard({ card, index }: { card: KnowledgeCard; index: number }) {
         <ReactMarkdown
           remarkPlugins={[remarkMath]}
           rehypePlugins={[rehypeKatex]}
-          components={mdComponents}
+          components={compactMdComponents}
         >
           {card.content_markdown}
         </ReactMarkdown>
@@ -162,7 +137,7 @@ function ComparisonCard({ card, index }: { card: KnowledgeCard; index: number })
       <ReactMarkdown
         remarkPlugins={[remarkMath, remarkGfm]}
         rehypePlugins={[rehypeKatex]}
-        components={mdComponents}
+        components={compactMdComponents}
       >
         {card.content_markdown}
       </ReactMarkdown>
@@ -189,7 +164,7 @@ function DefinitionCard({ card, index }: { card: KnowledgeCard; index: number })
         <ReactMarkdown
           remarkPlugins={[remarkMath]}
           rehypePlugins={[rehypeKatex]}
-          components={mdComponents}
+          components={compactMdComponents}
         >
           {card.content_markdown}
         </ReactMarkdown>
@@ -224,7 +199,7 @@ function ProcedureCard({ card, index }: { card: KnowledgeCard; index: number }) 
         <ReactMarkdown
           remarkPlugins={[remarkMath]}
           rehypePlugins={[rehypeKatex]}
-          components={mdComponents}
+          components={compactMdComponents}
         >
           {card.content_markdown}
         </ReactMarkdown>
@@ -288,6 +263,174 @@ function ModuleTags({ modules }: { modules: string[] }) {
   )
 }
 
+function TheoremCard({ card, index }: { card: KnowledgeCard; index: number }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: index * 0.06, duration: 0.35 }}
+      className="border border-blue-100 border-l-3 border-l-blue-700 rounded-sm p-5 bg-blue-50"
+    >
+      <div className="flex items-start justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] uppercase tracking-wider text-blue-700 font-body font-medium">
+            定理
+          </span>
+          <h3 className="font-heading text-lg text-text-main">{card.title}</h3>
+        </div>
+        <DifficultyStars count={card.difficulty_stars} />
+      </div>
+      <div className="text-text-body">
+        <ReactMarkdown
+          remarkPlugins={[remarkMath]}
+          rehypePlugins={[rehypeKatex]}
+          components={compactMdComponents}
+        >
+          {card.content_markdown}
+        </ReactMarkdown>
+      </div>
+      {card.symbols && card.symbols.length > 0 && <SymbolTable symbols={card.symbols} />}
+      {card.related_modules.length > 0 && (
+        <ModuleTags modules={card.related_modules} />
+      )}
+    </motion.div>
+  )
+}
+
+function ExampleCard({ card, index }: { card: KnowledgeCard; index: number }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: index * 0.06, duration: 0.35 }}
+      className="border border-emerald-100 border-l-3 border-l-emerald-700 rounded-sm p-5 bg-emerald-50"
+    >
+      <div className="flex items-start justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] uppercase tracking-wider text-emerald-700 font-body font-medium">
+            例题
+          </span>
+          <h3 className="font-heading text-lg text-text-main">{card.title}</h3>
+        </div>
+        <DifficultyStars count={card.difficulty_stars} />
+      </div>
+      <ReactMarkdown
+        remarkPlugins={[remarkMath, remarkGfm]}
+        rehypePlugins={[rehypeKatex]}
+        components={compactMdComponents}
+      >
+        {card.content_markdown}
+      </ReactMarkdown>
+      {card.related_modules.length > 0 && (
+        <ModuleTags modules={card.related_modules} />
+      )}
+    </motion.div>
+  )
+}
+
+function PitfallCard({ card, index }: { card: KnowledgeCard; index: number }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: index * 0.06, duration: 0.35 }}
+      className="border border-amber-100 border-l-3 border-l-amber-700 rounded-sm p-5 bg-amber-50"
+    >
+      <div className="flex items-start justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] uppercase tracking-wider text-amber-700 font-body font-medium">
+            ⚠ 易错
+          </span>
+          <h3 className="font-heading text-lg text-text-main">{card.title}</h3>
+        </div>
+        <DifficultyStars count={card.difficulty_stars} />
+      </div>
+      <ReactMarkdown
+        remarkPlugins={[remarkMath, remarkGfm]}
+        rehypePlugins={[rehypeKatex]}
+        components={compactMdComponents}
+      >
+        {card.content_markdown}
+      </ReactMarkdown>
+      {card.related_modules.length > 0 && (
+        <ModuleTags modules={card.related_modules} />
+      )}
+    </motion.div>
+  )
+}
+
+function MethodCard({ card, index }: { card: KnowledgeCard; index: number }) {
+  const lines = card.content_markdown.split('\n').filter((l) => l.trim())
+  const hasNumberedSteps = lines.some((l) => /^\d+[\.\)]\s/.test(l.trim()))
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: index * 0.06, duration: 0.35 }}
+      className="border border-violet-100 border-l-3 border-l-violet-700 rounded-sm p-5 bg-bg-card"
+    >
+      <div className="flex items-start justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] uppercase tracking-wider text-violet-700 font-body font-medium">
+            方法
+          </span>
+          <h3 className="font-heading text-lg text-text-main">{card.title}</h3>
+        </div>
+        <DifficultyStars count={card.difficulty_stars} />
+      </div>
+      {hasNumberedSteps ? (
+        <MethodSteps markdown={card.content_markdown} />
+      ) : (
+        <ReactMarkdown
+          remarkPlugins={[remarkMath]}
+          rehypePlugins={[rehypeKatex]}
+          components={compactMdComponents}
+        >
+          {card.content_markdown}
+        </ReactMarkdown>
+      )}
+      {card.related_modules.length > 0 && (
+        <ModuleTags modules={card.related_modules} />
+      )}
+    </motion.div>
+  )
+}
+
+/** Numbered steps for method cards — violet step indicators */
+function MethodSteps({ markdown }: { markdown: string }) {
+  const steps = markdown
+    .split('\n')
+    .filter((l) => l.trim())
+    .map((l) => l.replace(/^\d+[\.\)]\s*/, '').trim())
+    .filter(Boolean)
+
+  return (
+    <div className="relative pl-8 space-y-4">
+      <div className="absolute left-[11px] top-2 bottom-2 w-px bg-violet-200" />
+      {steps.map((step, i) => (
+        <div key={i} className="relative flex items-start gap-3">
+          <span
+            className="absolute left-[-32px] flex items-center justify-center w-6 h-6 rounded-full
+                        bg-violet-700 text-white text-xs font-medium shrink-0"
+          >
+            {i + 1}
+          </span>
+          <span className="text-sm text-text-body leading-relaxed inline-math-wrap">
+            <ReactMarkdown
+              remarkPlugins={[remarkMath]}
+              rehypePlugins={[rehypeKatex]}
+              components={{ p: ({ children }) => <>{children}</> }}
+            >
+              {step}
+            </ReactMarkdown>
+          </span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 /* ---------- Card Router ---------- */
 
 function CardRenderer({ card, index }: { card: KnowledgeCard; index: number }) {
@@ -300,6 +443,14 @@ function CardRenderer({ card, index }: { card: KnowledgeCard; index: number }) {
       return <DefinitionCard card={card} index={index} />
     case 'procedure':
       return <ProcedureCard card={card} index={index} />
+    case 'theorem':
+      return <TheoremCard card={card} index={index} />
+    case 'example':
+      return <ExampleCard card={card} index={index} />
+    case 'pitfall':
+      return <PitfallCard card={card} index={index} />
+    case 'method':
+      return <MethodCard card={card} index={index} />
     default:
       return <FormulaCard card={card} index={index} />
   }
@@ -308,6 +459,8 @@ function CardRenderer({ card, index }: { card: KnowledgeCard; index: number }) {
 /* ---------- Main Component ---------- */
 
 export default function KnowledgeCardsTab({ cards, errorTaxonomy }: KnowledgeCardsTabProps) {
+  const [activeType, setActiveType] = useState<CardType | 'all'>('all')
+
   if (!cards.length && !errorTaxonomy) {
     return (
       <div className="flex items-center justify-center h-40 text-text-muted text-sm">
@@ -316,12 +469,58 @@ export default function KnowledgeCardsTab({ cards, errorTaxonomy }: KnowledgeCar
     )
   }
 
+  // Determine which types actually appear in the data (for badge counts)
+  const typeCounts = cards.reduce<Record<string, number>>((acc, c) => {
+    acc[c.card_type] = (acc[c.card_type] ?? 0) + 1
+    return acc
+  }, {})
+
+  const presentTypes = ALL_TYPES.filter(
+    (t) => t === 'all' || typeCounts[t] !== undefined,
+  )
+
+  const visibleCards =
+    activeType === 'all' ? cards : cards.filter((c) => c.card_type === activeType)
+
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
+      {/* Type filter tabs — only show types that exist in the data */}
+      {cards.length > 0 && presentTypes.length > 2 && (
+        <div className="flex flex-wrap gap-1.5 border-b border-border-warm pb-4">
+          {presentTypes.map((t) => {
+            const isActive = activeType === t
+            const count = t === 'all' ? cards.length : (typeCounts[t] ?? 0)
+            return (
+              <button
+                key={t}
+                onClick={() => setActiveType(t)}
+                className={[
+                  'flex items-center gap-1.5 px-3 py-1 text-sm rounded-sm border transition-colors',
+                  isActive
+                    ? 'border-red-primary text-red-primary bg-bg-accent font-medium'
+                    : 'border-border-warm text-text-muted hover:border-red-primary hover:text-text-body bg-bg-card',
+                ].join(' ')}
+              >
+                <span className="font-mono text-xs opacity-70">{TYPE_ICONS[t]}</span>
+                {TYPE_LABELS[t]}
+                <span
+                  className={[
+                    'text-[10px] px-1 rounded-sm',
+                    isActive ? 'bg-red-primary text-white' : 'bg-border-warm text-text-muted',
+                  ].join(' ')}
+                >
+                  {count}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+
       {/* Cards grid — masonry-style with 2 columns */}
-      {cards.length > 0 && (
+      {visibleCards.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
-          {cards.map((card, i) => (
+          {visibleCards.map((card, i) => (
             <CardRenderer key={`${card.card_type}-${card.title}-${i}`} card={card} index={i} />
           ))}
         </div>
@@ -342,7 +541,7 @@ export default function KnowledgeCardsTab({ cards, errorTaxonomy }: KnowledgeCar
             <ReactMarkdown
               remarkPlugins={[remarkMath, remarkGfm]}
               rehypePlugins={[rehypeKatex]}
-              components={mdComponents}
+              components={compactMdComponents}
             >
               {errorTaxonomy}
             </ReactMarkdown>

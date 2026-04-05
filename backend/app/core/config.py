@@ -24,7 +24,7 @@ class Settings(BaseSettings):
 
     # JWT — secret_key must be strong
     secret_key: str = Field(..., alias="SECRET_KEY")
-    access_token_expire_minutes: int = 15
+    access_token_expire_minutes: int = 1440
     refresh_token_expire_days: int = 7
     algorithm: str = "HS256"
 
@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     # S3 / MinIO — credentials from .env
     s3_endpoint_url: str = Field(..., alias="S3_ENDPOINT_URL")
     s3_public_endpoint_url: str = Field(default="", alias="S3_PUBLIC_ENDPOINT_URL")
+    s3_public_url_prefix: str = Field(default="", alias="S3_PUBLIC_URL_PREFIX")
     s3_access_key: str = Field(..., alias="S3_ACCESS_KEY")
     s3_secret_key: str = Field(..., alias="S3_SECRET_KEY")
     s3_bucket_name: str = "zhijie-materials"

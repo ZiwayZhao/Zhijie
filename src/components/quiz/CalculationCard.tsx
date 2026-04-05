@@ -108,7 +108,7 @@ export default function CalculationCard({ question, index, total, onAnswer }: Ca
       {/* Steps */}
       <div className="space-y-3 mb-4">
         {question.steps.map((step, i) => (
-          <div key={i} className={`border rounded-md p-3 transition-colors
+          <div key={i} className={`border rounded-sm p-3 transition-colors
             ${revealed
               ? stepResults?.[i] ? 'border-emerald-300 bg-emerald-50/30' : 'border-red-primary/30 bg-red-primary/5'
               : 'border-border-warm'
@@ -131,7 +131,7 @@ export default function CalculationCard({ question, index, total, onAnswer }: Ca
               onChange={e => handleStepChange(i, e.target.value)}
               disabled={revealed}
               placeholder="输入答案"
-              className={`w-full px-2 py-1.5 text-sm font-body border rounded-md outline-none transition-colors bg-bg-main
+              className={`w-full px-2 py-1.5 text-sm font-body border rounded-sm outline-none transition-colors bg-bg-main
                 ${revealed
                   ? stepResults?.[i] ? 'border-emerald-400 text-emerald-700' : 'border-red-primary text-red-primary'
                   : 'border-border-warm focus:border-red-primary text-text-main'
@@ -147,7 +147,7 @@ export default function CalculationCard({ question, index, total, onAnswer }: Ca
       </div>
 
       {/* Final answer */}
-      <div className={`border rounded-md p-3 mb-4 transition-colors
+      <div className={`border rounded-sm p-3 mb-4 transition-colors
         ${revealed
           ? finalCorrect ? 'border-emerald-300 bg-emerald-50/30' : 'border-red-primary/30 bg-red-primary/5'
           : 'border-border-warm bg-bg-accent'
@@ -159,7 +159,7 @@ export default function CalculationCard({ question, index, total, onAnswer }: Ca
           onChange={e => setFinalInput(e.target.value)}
           disabled={revealed}
           placeholder="输入最终答案"
-          className={`w-full mt-2 px-2 py-1.5 text-sm font-body border rounded-md outline-none transition-colors bg-bg-main
+          className={`w-full mt-2 px-2 py-1.5 text-sm font-body border rounded-sm outline-none transition-colors bg-bg-main
             ${revealed
               ? finalCorrect ? 'border-emerald-400 text-emerald-700' : 'border-red-primary text-red-primary'
               : 'border-border-warm focus:border-red-primary text-text-main'
@@ -177,7 +177,7 @@ export default function CalculationCard({ question, index, total, onAnswer }: Ca
         <button
           onClick={handleReveal}
           className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-body text-white bg-red-primary
-                     rounded-md hover:bg-red-dark transition-colors"
+                     rounded-sm hover:bg-red-dark transition-colors"
         >
           <Eye size={11} />
           查看答案

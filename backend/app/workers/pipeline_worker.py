@@ -298,7 +298,7 @@ async def _run_pipeline_async(task_id_str: str):
                     await session.commit()
                     logger.info("Specialist output saved for module %d (%s)", idx, db_module.name)
 
-                spec_results = await run_specialist(
+                await run_specialist(
                     parsed=parsed,
                     plan=plan,
                     llm=llm,
@@ -549,8 +549,8 @@ async def _run_pipeline_async(task_id_str: str):
     bind=True,
     name="pipeline.run",
     max_retries=2,
-    soft_time_limit=1800,  # 30 min for large materials
-    time_limit=1860,
+    soft_time_limit=3600,  # 60 min for large materials (JSON fallback retries are slow)
+    time_limit=3660,
 )
 def run_pipeline(self: Task, task_id: str):
     """Celery entry point — runs the async pipeline in a fresh event loop.
@@ -576,15 +576,3 @@ async def _dispose_and_run(task_id: str):
     await _run_pipeline_async(task_id)
 
 
-async def _mark_failed(task_id_str: str, error: str):
-    """Mark task as failed in DB (called from sync Celery error handler)."""
-    from app.db.session import engine
-    await engine.dispose()
-    task_id = uuid.UUID(task_id_str)
-    async with async_session_factory() as session:
-        await _update_task(
-            session, task_id,
-            status="failed",
-            error_message=error,
-            error_phase="unknown",
-        )

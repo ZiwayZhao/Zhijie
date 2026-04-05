@@ -103,7 +103,7 @@ export default function ShortAnswerCard({ question, index, total, onAnswer }: Sh
           disabled={submitted}
           placeholder="在此输入你的答案..."
           rows={4}
-          className={`w-full px-3 py-2 text-sm font-body border rounded-md resize-none
+          className={`w-full px-3 py-2 text-sm font-body border rounded-sm resize-none
             outline-none transition-colors bg-bg-main
             ${submitted ? 'border-border-warm text-text-muted' : 'border-border-warm focus:border-red-primary text-text-body'}`}
         />
@@ -117,7 +117,7 @@ export default function ShortAnswerCard({ question, index, total, onAnswer }: Sh
           onClick={handleSubmit}
           disabled={!text.trim()}
           className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-body text-white bg-red-primary
-                     rounded-md hover:bg-red-dark transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                     rounded-sm hover:bg-red-dark transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
           <Send size={11} />
           提交答案
@@ -139,7 +139,7 @@ export default function ShortAnswerCard({ question, index, total, onAnswer }: Sh
             </div>
 
             {/* Self-grading rubric */}
-            <div className="border border-border-warm rounded-md p-3 mb-3">
+            <div className="border border-border-warm rounded-sm p-3 mb-3">
               <p className="text-xs font-medium text-text-main mb-2">自评得分点（勾选你覆盖的要点）</p>
               <div className="space-y-1.5">
                 {question.scoring_rubric.map((item, i) => (
@@ -167,7 +167,7 @@ export default function ShortAnswerCard({ question, index, total, onAnswer }: Sh
                   <button
                     onClick={handleConfirmGrade}
                     className="px-3 py-1 text-xs font-body text-white bg-red-primary
-                               rounded-md hover:bg-red-dark transition-colors"
+                               rounded-sm hover:bg-red-dark transition-colors"
                   >
                     确认评分
                   </button>

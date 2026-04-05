@@ -218,7 +218,7 @@ export async function generateEvolutionAction(
         hint: `提示：与「${note.tags[0] ?? '本知识点'}」相关`,
       }
     default:
-      return { type: 'retire', cardId: trigger.cardId }
+      return { type: 'retire', cardId: (trigger as EvolutionTrigger).cardId }
   }
 }
 

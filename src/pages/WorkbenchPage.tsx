@@ -1,19 +1,29 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { ArrowLeft, MessageCircle, Loader2, Wrench } from 'lucide-react'
+import {
+  ArrowLeft, Loader2, Wrench, MessageCircle, StickyNote,
+  PanelRightClose, PanelRightOpen,
+} from 'lucide-react'
+import { Panel, Group, Separator } from 'react-resizable-panels'
 import { fetchCourse, fetchMaterial, type CourseItem, type MaterialItem } from '@/lib/api'
 import type { KnowledgeCardResult } from '@/lib/types/knowledge-card'
 import MaterialReader from '@/components/workbench/MaterialReader'
 import AIToolPanel from '@/components/workbench/AIToolPanel'
 import TutorSidebar from '@/components/tutor/TutorSidebar'
+import NotesPanel from '@/components/workbench/NotesPanel'
 import ErrorBoundary from '@/components/ErrorBoundary'
 import ToastContainer from '@/components/ui/ToastContainer'
 import { showToast } from '@/lib/toast-store'
-import { loadProfile } from '@/lib/student-model'
-import { loadExamProfile } from '@/lib/exam-profile'
-import type { ExamProfile } from '@/lib/exam-profile'
 import type { MCQuestion } from '@/lib/api'
+
+type SidebarTab = 'tools' | 'tutor' | 'notes'
+
+const SIDEBAR_TABS: { key: SidebarTab; label: string; icon: typeof Wrench }[] = [
+  { key: 'tools', label: '分析', icon: Wrench },
+  { key: 'tutor', label: '助教', icon: MessageCircle },
+  { key: 'notes', label: '笔记', icon: StickyNote },
+]
 
 export default function WorkbenchPage() {
   const { id: courseId, mid } = useParams()
@@ -30,8 +40,22 @@ export default function WorkbenchPage() {
   const [currentModuleId, setCurrentModuleId] = useState<string | null>(null)
   const [currentModuleName, setCurrentModuleName] = useState<string | null>(null)
   const [knowledgeCards, setKnowledgeCards] = useState<KnowledgeCardResult | null>(null)
-  const [sidebarTab, setSidebarTab] = useState<'tools' | 'tutor'>('tutor')
-  const [examProfile, setExamProfile] = useState<ExamProfile | null>(null)
+  const [sidebarTab, setSidebarTab] = useState<SidebarTab>('tutor')
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [pendingTutorMessage, setPendingTutorMessage] = useState<string | null>(null)
+
+  // Keyboard shortcut: ] to toggle sidebar
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === ']' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const tag = (e.target as HTMLElement)?.tagName
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable) return
+        setSidebarCollapsed((prev) => !prev)
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [])
 
   useEffect(() => {
     const promises: Promise<void>[] = []
@@ -48,14 +72,6 @@ export default function WorkbenchPage() {
     Promise.all(promises).finally(() => setLoading(false))
   }, [courseId, mid])
 
-  // Load saved exam profile
-  useEffect(() => {
-    if (courseId) {
-      const saved = loadExamProfile(courseId)
-      if (saved) setExamProfile(saved)
-    }
-  }, [courseId])
-
   const handleModuleSelect = useCallback((
     moduleId: string,
     moduleName: string,
@@ -63,12 +79,16 @@ export default function WorkbenchPage() {
     concepts?: string[],
     traps?: string[],
   ) => {
-    setSpecialistMarkdown(markdown)
-    setKeyConcepts(concepts ?? [])
-    setExamTraps(traps ?? [])
-    setActiveTab('specialist')
     setCurrentModuleId(moduleId)
     setCurrentModuleName(moduleName)
+    if (markdown && markdown.trim()) {
+      setSpecialistMarkdown(markdown)
+      setKeyConcepts(concepts ?? [])
+      setExamTraps(traps ?? [])
+      setActiveTab('specialist')
+    } else {
+      showToast(`模块「${moduleName}」暂无 AI 精讲内容`)
+    }
   }, [])
 
   const handleQuizReady = useCallback((questions: MCQuestion[]) => {
@@ -82,73 +102,52 @@ export default function WorkbenchPage() {
     setKnowledgeCards(data)
   }, [])
 
-  // Switch sidebar to Tutor tab (triggered by qa tool click)
+  // Called from NotesPanel when user clicks AI explain on a highlight
+  const handleAIExplain = useCallback((text: string) => {
+    const prompt = `请解释以下从课件中选中的内容，帮我理解它的含义和重要性：\n\n「${text}」`
+    setSidebarTab('tutor')
+    setSidebarCollapsed(false)
+    setPendingTutorMessage(prompt)
+  }, [])
+
   const handleSwitchToTutor = useCallback((context?: string) => {
     setSidebarTab('tutor')
+    setSidebarCollapsed(false)
     if (context) {
       showToast(`已切换到 AI 助教 — ${context}`)
     }
   }, [])
 
-  // Generate flashcards from current specialist content
   const handleGenerateFlashcards = useCallback(() => {
     if (!specialistMarkdown || !currentModuleName) {
       showToast('请先选择一个模块查看 AI 精讲')
       return
     }
-
-    const concepts = keyConcepts.length > 0 ? keyConcepts : []
-    const traps = examTraps.length > 0 ? examTraps : []
-    const allItems = [...concepts, ...traps]
-
+    const allItems = [...keyConcepts, ...examTraps]
     if (allItems.length === 0) {
       showToast('当前模块没有可提取的知识点')
       return
     }
-
-    const cards = allItems.map((item, _i) => ({
+    const cards = allItems.map((item) => ({
       id: crypto.randomUUID(),
       type: 'basic' as const,
-      fields: {
-        front: item,
-        back: '(复习精讲内容)',
-        extra: '',
-      },
+      fields: { front: item, back: '(复习精讲内容)', extra: '' },
       tags: [courseId || 'unknown', currentModuleName],
-      sourceRef: {
-        materialId: material?.id || '',
-        moduleId: currentModuleId || '',
-      },
+      sourceRef: { materialId: material?.id || '', moduleId: currentModuleId || '' },
       createdAt: Date.now(),
       generatedBy: 'ai' as const,
     }))
-
     const deckKey = `zhijie_flashcards_${courseId || 'default'}`
     try {
       const existing = JSON.parse(localStorage.getItem(deckKey) || '[]')
       localStorage.setItem(deckKey, JSON.stringify([...existing, ...cards]))
     } catch {
-      // localStorage quota exceeded
       showToast('闪卡保存失败：存储空间不足')
       return
     }
-
     showToast(`已生成 ${cards.length} 张闪卡`)
   }, [specialistMarkdown, currentModuleName, keyConcepts, examTraps, courseId, material?.id, currentModuleId])
 
-  // Handle module quiz from manual tool (filter questions and switch to quiz tab)
-  const handleModuleQuizFromTool = useCallback((_moduleId: string, moduleName: string) => {
-    const count = quizQuestions.filter((q) => q.source_module_name === moduleName).length
-    if (count > 0) {
-      setQuizModuleFilter(moduleName)
-      setActiveTab('quiz')
-      showToast(`已筛选 ${count} 道「${moduleName}」测验题`)
-    } else {
-      showToast('当前模块暂无测验题，请先完成课件分析')
-    }
-  }, [quizQuestions])
-
-  // Filter quiz questions by module when a filter is active, without losing the full set
   const displayedQuizQuestions = useMemo(() => {
     if (!quizModuleFilter) return quizQuestions
     return quizQuestions.filter((q) => q.source_module_name === quizModuleFilter)
@@ -167,9 +166,7 @@ export default function WorkbenchPage() {
     return (
       <div className="p-8 lg:p-10">
         <h1 className="font-heading text-2xl text-text-main">材料未找到</h1>
-        <p className="text-text-muted mt-2">
-          无法找到对应的学习材料。
-        </p>
+        <p className="text-text-muted mt-2">无法找到对应的学习材料。</p>
         <Link
           to={courseId ? `/course/${courseId}` : '/'}
           className="inline-flex items-center gap-1.5 mt-4 text-sm text-red-primary hover:underline"
@@ -182,179 +179,180 @@ export default function WorkbenchPage() {
   }
 
   return (
-    <div className="flex flex-col lg:flex-row min-h-0">
-      {/* 70% Left — Material reader (journal page) */}
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.35 }}
-        className="flex-[7] min-w-0 p-6 lg:py-10 lg:px-12 overflow-y-auto print:flex-[1] print:p-0"
-      >
-        {/* Breadcrumb — editorial navigation */}
-        <nav className="flex items-center gap-1.5 text-xs text-text-muted mb-8">
-          <Link to="/" className="hover:text-text-body transition-colors no-underline text-text-muted">
+    <div className="h-[calc(100vh-3.5rem)] flex flex-col print:h-auto">
+      {/* Compact toolbar */}
+      <div className="flex items-center justify-between px-4 py-1.5 border-b border-border-warm bg-bg-card shrink-0 print:hidden">
+        <nav className="flex items-center gap-1.5 text-[11px] text-text-muted min-w-0">
+          <Link to="/" className="hover:text-text-body transition-colors no-underline text-text-muted shrink-0">
             首页
           </Link>
-          <span className="text-border-warm">/</span>
           {course && (
             <>
+              <span className="text-border-warm">/</span>
               <Link
                 to={`/course/${course.slug}`}
-                className="hover:text-text-body transition-colors no-underline text-text-muted"
+                className="hover:text-text-body transition-colors no-underline text-text-muted shrink-0 max-w-[120px] truncate"
               >
                 {course.name}
               </Link>
-              <span className="text-border-warm">/</span>
             </>
           )}
-          <span className="text-text-body">{material.title || material.filename}</span>
+          <span className="text-border-warm">/</span>
+          <span className="text-text-body truncate max-w-[200px]">{material.title || material.filename}</span>
         </nav>
 
-        <ErrorBoundary>
-          <MaterialReader
-            material={material}
-            courseId={courseId}
-            courseName={course?.name}
-            courseSchool={course?.school}
-            specialistMarkdown={specialistMarkdown}
-            keyConcepts={keyConcepts}
-            examTraps={examTraps}
-            knowledgeCards={knowledgeCards}
-            quizQuestions={displayedQuizQuestions}
-            quizModuleFilter={quizModuleFilter}
-            onClearQuizFilter={() => setQuizModuleFilter(null)}
-            activeTab={activeTab}
-            onTabChange={setActiveTab}
-            onGenerateFlashcards={handleGenerateFlashcards}
-          />
-        </ErrorBoundary>
+        <button
+          onClick={() => setSidebarCollapsed((p) => !p)}
+          className="p-1 text-text-muted hover:text-red-primary transition-colors rounded-sm hover:bg-bg-accent/60"
+          title={sidebarCollapsed ? '展开面板 ]' : '收起面板 ]'}
+        >
+          {sidebarCollapsed ? <PanelRightOpen size={14} /> : <PanelRightClose size={14} />}
+        </button>
+      </div>
 
-        {/* CTA: switch to AI Tutor tab for Socratic dialogue */}
-        {specialistMarkdown && currentModuleId && sidebarTab !== 'tutor' && (
+      {/* Main resizable panels */}
+      <Group orientation="horizontal" className="flex-1 min-h-0" style={{ display: 'flex' }}>
+        {/* Left: Material reader */}
+        <Panel defaultSize="65%" minSize="40%" id="reader">
           <motion.div
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2, duration: 0.3 }}
-            className="mt-8"
-          >
-            <button
-              onClick={() => setSidebarTab('tutor')}
-              className="group flex items-center gap-3 w-full py-4 px-5 border border-border-warm rounded-sm
-                         bg-bg-card hover:border-red-primary transition-colors text-left"
-            >
-              <div className="w-8 h-8 flex items-center justify-center border border-border-warm
-                              group-hover:border-red-primary transition-colors">
-                <MessageCircle size={15} strokeWidth={1.5} className="text-text-muted group-hover:text-red-primary transition-colors" />
-              </div>
-              <div>
-                <p className="text-sm font-medium text-text-main group-hover:text-red-primary transition-colors">
-                  向 AI 助教提问
-                </p>
-                <p className="text-xs text-text-muted mt-0.5">
-                  AI 助教用苏格拉底式提问引导你深入理解
-                </p>
-              </div>
-            </button>
-          </motion.div>
-        )}
-
-      </motion.div>
-
-      {/* 30% Right — Sidebar with tab switch: Tools | Tutor */}
-      <motion.aside
-        initial={{ opacity: 0, x: 16 }}
-        animate={{ opacity: 1, x: 0 }}
-        transition={{ delay: 0.15, duration: 0.35 }}
-        className="flex-[3] lg:min-w-[400px] border-l border-border-warm bg-bg-card
-                   lg:sticky lg:top-0 lg:h-screen
-                   max-lg:border-t max-lg:border-l-0
-                   flex flex-col print:hidden"
-      >
-        {/* Sidebar tab bar */}
-        <div className="flex border-b border-border-warm px-5 pt-4 lg:px-6 lg:pt-5 shrink-0">
-          <button
-            onClick={() => setSidebarTab('tools')}
-            className={`flex items-center gap-1.5 px-3 pb-2.5 text-sm transition-colors border-b-2 ${
-              sidebarTab === 'tools'
-                ? 'border-red-primary text-red-primary'
-                : 'border-transparent text-text-muted hover:text-text-body'
-            }`}
-          >
-            <Wrench size={14} strokeWidth={1.5} />
-            分析工具
-          </button>
-          <button
-            onClick={() => setSidebarTab('tutor')}
-            className={`flex items-center gap-1.5 px-3 pb-2.5 text-sm transition-colors border-b-2 ${
-              sidebarTab === 'tutor'
-                ? 'border-red-primary text-red-primary'
-                : 'border-transparent text-text-muted hover:text-text-body'
-            }`}
-          >
-            <MessageCircle size={14} strokeWidth={1.5} />
-            AI 助教
-          </button>
-        </div>
-
-        {/* Tab content — visibility-based toggle preserves state.
-             The active panel gets z-20 to sit clearly above the hidden one (z-0).
-             Hidden panel uses pointer-events-none + visibility-hidden after opacity
-             transition to ensure no ghost click interception. */}
-        <div className="flex-1 min-h-0 relative">
-          <div
-            className={`absolute inset-0 overflow-y-auto p-5 lg:p-6 transition-opacity duration-150 ${
-              sidebarTab === 'tools'
-                ? 'opacity-100 z-20'
-                : 'opacity-0 pointer-events-none z-0 invisible'
-            }`}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.3 }}
+            className="h-full overflow-y-auto p-4 lg:py-5 lg:px-6"
           >
             <ErrorBoundary>
-              <AIToolPanel
-                materialId={material.id}
+              <MaterialReader
+                material={material}
                 courseId={courseId}
                 courseName={course?.name}
+                courseSchool={course?.school}
                 specialistMarkdown={specialistMarkdown}
-                currentModuleName={currentModuleName}
-                quizQuestions={quizQuestions}
-                onModuleSelect={handleModuleSelect}
-                onQuizReady={handleQuizReady}
-                onKnowledgeCardsReady={handleKnowledgeCardsReady}
-                onModuleQuiz={(_modId, modName) => {
-                  setQuizModuleFilter(modName)
-                  setActiveTab('quiz')
-                }}
-                onSwitchToTutor={handleSwitchToTutor}
+                keyConcepts={keyConcepts}
+                examTraps={examTraps}
+                knowledgeCards={knowledgeCards}
+                quizQuestions={displayedQuizQuestions}
+                quizModuleFilter={quizModuleFilter}
+                onClearQuizFilter={() => setQuizModuleFilter(null)}
+                activeTab={activeTab}
+                onTabChange={setActiveTab}
                 onGenerateFlashcards={handleGenerateFlashcards}
               />
             </ErrorBoundary>
-          </div>
-          <div
-            className={`absolute inset-0 overflow-y-auto p-5 lg:p-6 transition-opacity duration-150 ${
-              sidebarTab === 'tutor'
-                ? 'opacity-100 z-20'
-                : 'opacity-0 pointer-events-none z-0 invisible'
-            }`}
-          >
-            <ErrorBoundary>
-              <TutorSidebar
-                materialId={material.id}
-                moduleId={currentModuleId}
-                moduleName={currentModuleName}
-                courseId={courseId}
-                onSpecialistView={(markdown, moduleName) => {
-                  setSpecialistMarkdown(markdown)
-                  setCurrentModuleName(moduleName)
-                  setActiveTab('specialist')
-                }}
-                onQuizView={(questions) => {
-                  setQuizQuestions(questions)
-                  setActiveTab('quiz')
-                }}
-              />
-            </ErrorBoundary>
-          </div>
-        </div>
-      </motion.aside>
+          </motion.div>
+        </Panel>
+
+        {/* Resize handle */}
+        {!sidebarCollapsed && (
+          <Separator className="w-[5px] bg-transparent hover:bg-red-primary/20 active:bg-red-primary/30 transition-colors cursor-col-resize relative group">
+            <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-px bg-border-warm group-hover:bg-red-primary/40 transition-colors" />
+          </Separator>
+        )}
+
+        {/* Right: Sidebar */}
+        {!sidebarCollapsed && (
+          <Panel defaultSize="35%" minSize="25%" maxSize="50%" id="sidebar">
+            <aside className="h-full flex flex-col bg-bg-card border-l border-border-warm">
+              {/* Sidebar tab bar */}
+              <div className="flex border-b border-border-warm shrink-0">
+                {SIDEBAR_TABS.map(({ key, label, icon: Icon }) => (
+                  <button
+                    key={key}
+                    onClick={() => setSidebarTab(key)}
+                    className={`flex-1 flex items-center justify-center gap-1 py-2 text-[11px] transition-colors border-b-2 ${
+                      sidebarTab === key
+                        ? 'border-red-primary text-red-primary font-medium'
+                        : 'border-transparent text-text-muted hover:text-text-body'
+                    }`}
+                  >
+                    <Icon size={13} strokeWidth={1.5} />
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Tab content — visibility toggle preserves state */}
+              <div className="flex-1 min-h-0 relative">
+                {/* Tools tab */}
+                <div
+                  className={`absolute inset-0 overflow-y-auto p-4 lg:p-5 transition-opacity duration-150 ${
+                    sidebarTab === 'tools'
+                      ? 'opacity-100 z-20'
+                      : 'opacity-0 pointer-events-none z-0 invisible'
+                  }`}
+                >
+                  <ErrorBoundary>
+                    <AIToolPanel
+                      materialId={material.id}
+                      courseId={courseId}
+                      courseName={course?.name}
+                      specialistMarkdown={specialistMarkdown}
+                      currentModuleName={currentModuleName}
+                      quizQuestions={quizQuestions}
+                      onModuleSelect={handleModuleSelect}
+                      onQuizReady={handleQuizReady}
+                      onKnowledgeCardsReady={handleKnowledgeCardsReady}
+                      onModuleQuiz={(_modId, modName) => {
+                        setQuizModuleFilter(modName)
+                        setActiveTab('quiz')
+                      }}
+                      onSwitchToTutor={handleSwitchToTutor}
+                      onGenerateFlashcards={handleGenerateFlashcards}
+                    />
+                  </ErrorBoundary>
+                </div>
+
+                {/* Tutor tab */}
+                <div
+                  className={`absolute inset-0 overflow-y-auto transition-opacity duration-150 ${
+                    sidebarTab === 'tutor'
+                      ? 'opacity-100 z-20'
+                      : 'opacity-0 pointer-events-none z-0 invisible'
+                  }`}
+                >
+                  <ErrorBoundary>
+                    <TutorSidebar
+                      materialId={material.id}
+                      moduleId={currentModuleId}
+                      moduleName={currentModuleName}
+                      courseId={courseId}
+                      pendingMessage={pendingTutorMessage}
+                      onPendingMessageSent={() => setPendingTutorMessage(null)}
+                      onSpecialistView={(markdown, moduleName) => {
+                        setSpecialistMarkdown(markdown)
+                        setCurrentModuleName(moduleName)
+                        setActiveTab('specialist')
+                      }}
+                      onQuizView={(questions) => {
+                        setQuizQuestions(questions)
+                        setActiveTab('quiz')
+                      }}
+                    />
+                  </ErrorBoundary>
+                </div>
+
+                {/* Notes tab */}
+                <div
+                  className={`absolute inset-0 overflow-y-auto p-4 lg:p-5 transition-opacity duration-150 ${
+                    sidebarTab === 'notes'
+                      ? 'opacity-100 z-20'
+                      : 'opacity-0 pointer-events-none z-0 invisible'
+                  }`}
+                >
+                  <ErrorBoundary>
+                    <NotesPanel
+                      materialId={material.id}
+                      materialTitle={material.title || material.filename}
+                      courseId={courseId}
+                      courseName={course?.name}
+                      onAIExplain={handleAIExplain}
+                    />
+                  </ErrorBoundary>
+                </div>
+              </div>
+            </aside>
+          </Panel>
+        )}
+      </Group>
 
       <ToastContainer />
     </div>

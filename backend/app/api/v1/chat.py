@@ -29,7 +29,7 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 
 # ── Models ────────────────────────────────────────────────────────
 
-CHAT_MODEL = "z-ai/glm-5-turbo-20260315"
+CHAT_MODEL = "glm-4.7"
 MAX_CONTEXT_CHARS = 8000
 MAX_HISTORY_TURNS = 20  # Prevent excessive context
 

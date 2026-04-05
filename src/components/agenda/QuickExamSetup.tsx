@@ -7,7 +7,7 @@ import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { GraduationCap, CalendarDays, ChevronDown, Plus, X } from 'lucide-react'
 import { fetchCourses, type CourseItem } from '@/lib/api'
-import { saveExamConfigs, loadExamConfigs, type ExamConfig } from '@/lib/agenda-engine'
+import { saveExamConfigs, loadExamConfigs } from '@/lib/agenda-engine'
 
 interface QuickExamSetupProps {
   onExamSet: () => void

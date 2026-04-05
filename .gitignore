@@ -22,3 +22,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Non-code assets
+宣传截图/
+测试用 pdf/
