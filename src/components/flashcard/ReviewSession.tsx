@@ -152,8 +152,8 @@ export default function ReviewSession({ deck, dueCards, onComplete }: ReviewSess
     masterySnapshotRef.current = snapshot
   }, [dueCards, deck.notes])
 
-  // Timer for current card
-  const cardStartTime = useRef(Date.now())
+  // Timer for current card — initialize in effect to avoid Date.now() during render
+  const cardStartTime = useRef(0)
 
   useEffect(() => {
     cardStartTime.current = Date.now()
@@ -179,32 +179,38 @@ export default function ReviewSession({ deck, dueCards, onComplete }: ReviewSess
       // Apply review
       const result = reviewCard(currentCard.card, rating)
 
-      // Update card in deck
+      // Update card in deck (immutable — create copies instead of mutating props)
       const cardIdx = deck.cards.findIndex((c) => c.id === currentCard.id)
+      const updatedCards = [...deck.cards]
       if (cardIdx >= 0) {
-        deck.cards[cardIdx] = {
-          ...deck.cards[cardIdx],
+        updatedCards[cardIdx] = {
+          ...updatedCards[cardIdx],
           card: result.card,
           consecutiveAgain: rating === (Rating.Again as 1)
-            ? deck.cards[cardIdx].consecutiveAgain + 1
+            ? updatedCards[cardIdx].consecutiveAgain + 1
             : 0,
           consecutiveEasy: rating === (Rating.Easy as 4)
-            ? deck.cards[cardIdx].consecutiveEasy + 1
+            ? updatedCards[cardIdx].consecutiveEasy + 1
             : 0,
         }
       }
 
-      // Add review log
-      deck.reviewLogs.push({
-        cardId: currentCard.id,
-        rating,
-        reviewedAt: new Date().toISOString(),
-        responseMs: elapsedMs,
-        log: result.log,
-      })
+      // Add review log (immutable)
+      const updatedLogs = [
+        ...deck.reviewLogs,
+        {
+          cardId: currentCard.id,
+          rating,
+          reviewedAt: new Date().toISOString(),
+          responseMs: elapsedMs,
+          log: result.log,
+        },
+      ]
+
+      const updatedDeck = { ...deck, cards: updatedCards, reviewLogs: updatedLogs }
 
       // Save to localStorage
-      saveDeck(deck)
+      saveDeck(updatedDeck)
 
       // BKT feedback: update student model
       const note = deck.notes.find((n) => n.id === currentCard.noteId)
@@ -220,11 +226,11 @@ export default function ReviewSession({ deck, dueCards, onComplete }: ReviewSess
       }
 
       // Detect evolution triggers (async — fire-and-forget, results collected before completion)
-      const updatedCard = deck.cards[cardIdx >= 0 ? cardIdx : 0]
+      const updatedCard = updatedCards[cardIdx >= 0 ? cardIdx : 0]
       if (updatedCard) {
-        const triggers = detectTriggers(updatedCard, deck)
+        const triggers = detectTriggers(updatedCard, updatedDeck)
         for (const trigger of triggers) {
-          const triggerNote = deck.notes.find((n) => n.id === trigger.noteId)
+          const triggerNote = updatedDeck.notes.find((n) => n.id === trigger.noteId)
           if (triggerNote) {
             const existing = evolutionQueue.current.find(
               (s) => s.trigger.cardId === trigger.cardId && s.trigger.type === trigger.type,

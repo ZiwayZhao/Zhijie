@@ -121,7 +121,7 @@ async def update_llm_settings(
             masked = mask_api_key(raw_key)
             has_key = True
         except Exception:
-            pass
+            logger.warning("Failed to decrypt API key for user %s (update response)", user.id)
 
     return LLMSettingsResponse(
         llm_provider=settings.llm_provider,

@@ -2,7 +2,7 @@
  * DeckList — displays all flashcard decks grouped by course.
  * Styled as a collection of book spines / journal issue covers.
  */
-import { useMemo } from 'react'
+import { useMemo, useSyncExternalStore } from 'react'
 import { motion } from 'framer-motion'
 import { useNavigate } from 'react-router-dom'
 import { Sparkles, BookOpen } from 'lucide-react'
@@ -123,14 +123,20 @@ function DeckItem({ deck, index }: { deck: FlashcardDeck; index: number }) {
   )
 }
 
+/** Subscribe to a coarse-grained "now" snapshot (updates on mount only). */
+let _mountTime = 0
+const _subscribe = (cb: () => void) => { _mountTime = Date.now(); cb(); return () => {} }
+const _getSnapshot = () => _mountTime
+
 function EvolutionBadge({ courseId }: { courseId: string }) {
   const logs = useMemo(() => loadEvolutionLogs(courseId), [courseId])
+  const now = useSyncExternalStore(_subscribe, _getSnapshot)
+
   if (logs.length === 0) return null
 
   // Show recent evolutions (last 7 days)
-  const recentCount = logs.filter(
-    (l) => Date.now() - l.timestamp < 7 * 24 * 60 * 60 * 1000,
-  ).length
+  const sevenDaysMs = 7 * 24 * 60 * 60 * 1000
+  const recentCount = logs.filter((l) => now - l.timestamp < sevenDaysMs).length
 
   if (recentCount === 0) return null
 

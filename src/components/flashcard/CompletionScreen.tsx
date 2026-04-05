@@ -2,7 +2,7 @@
  * CompletionScreen — shown after a review session ends.
  * Displays stats, mastery changes, and evolution suggestions.
  */
-import { useState } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { BookOpen, Sparkles, ArrowRight, CheckCircle2 } from 'lucide-react'
 import type { FlashcardDeck } from '@/lib/fsrs'
@@ -108,22 +108,23 @@ export default function CompletionScreen({
   onClose: () => void
 }) {
   const [appliedEvolutions, setAppliedEvolutions] = useState<Set<string>>(new Set())
+  const getNow = useRef(() => Date.now()).current
 
-  function handleApplyEvolution(suggestion: EvolutionSuggestion) {
+  const handleApplyEvolution = useCallback((suggestion: EvolutionSuggestion) => {
     const updated = applyEvolution(deck, suggestion.action)
-    deck.notes = updated.notes
-    deck.cards = updated.cards
-    saveDeck(deck)
+    const updatedDeck = { ...deck, notes: updated.notes, cards: updated.cards }
+    saveDeck(updatedDeck)
 
-    saveEvolutionLog(deck.courseId, {
-      id: `evo-${Date.now()}`,
+    const now = getNow()
+    saveEvolutionLog(updatedDeck.courseId, {
+      id: `evo-${now}`,
       trigger: suggestion.trigger,
       action: suggestion.action,
-      timestamp: Date.now(),
+      timestamp: now,
     })
 
     setAppliedEvolutions((prev) => new Set([...prev, suggestion.trigger.cardId]))
-  }
+  }, [deck, getNow])
 
   const correctCount = stats.ratings[Rating.Good as 3] + stats.ratings[Rating.Easy as 4]
   const correctPct = stats.total > 0 ? Math.round((correctCount / stats.total) * 100) : 0

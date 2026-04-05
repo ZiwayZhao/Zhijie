@@ -66,8 +66,6 @@ function getItemSubtext(item: AgendaItemType): string | null {
     case 'flashcard-review':
     case 'study':
       return `预计${item.estimatedMin}分钟`
-    case 'exam-prep':
-      return `预计${item.estimatedMin}分钟`
     default:
       return null
   }
