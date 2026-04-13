@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { FileText, Upload, ChevronRight, Trash2 } from 'lucide-react'
 import { fetchMaterials, deleteMaterial, type MaterialItem } from '@/lib/api'
+import ConfirmDialog from '@/components/ui/ConfirmDialog'
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -26,6 +27,7 @@ const fadeUp = {
 export default function MyMaterialsPage() {
   const [materials, setMaterials] = useState<MaterialItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
 
   useEffect(() => {
     fetchMaterials({ limit: 100 })
@@ -34,14 +36,19 @@ export default function MyMaterialsPage() {
       .finally(() => setLoading(false))
   }, [])
 
-  async function handleDelete(id: string) {
-    if (!window.confirm('确定要删除这份材料吗？此操作不可撤销。')) return
+  const confirmDelete = useCallback(async () => {
+    if (!deleteTarget) return
     try {
-      await deleteMaterial(id)
-      setMaterials((prev) => prev.filter((m) => m.id !== id))
+      await deleteMaterial(deleteTarget)
+      setMaterials((prev) => prev.filter((m) => m.id !== deleteTarget))
     } catch (e) {
       console.error('Delete failed:', e)
     }
+    setDeleteTarget(null)
+  }, [deleteTarget])
+
+  function handleDelete(id: string) {
+    setDeleteTarget(id)
   }
 
   if (loading) {
@@ -87,6 +94,15 @@ export default function MyMaterialsPage() {
           ))}
         </div>
       )}
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title="删除材料"
+        description="确定要删除这份材料吗？此操作不可撤销。"
+        confirmLabel="删除"
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   )
 }

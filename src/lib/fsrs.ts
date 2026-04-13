@@ -195,15 +195,15 @@ export function ratingLabel(rating: 1 | 2 | 3 | 4): string {
 export function ratingColor(rating: 1 | 2 | 3 | 4): string {
   switch (rating) {
     case Rating.Again:
-      return '#A5192E'
+      return 'var(--color-red-primary)'
     case Rating.Hard:
-      return '#C49A2A'
+      return 'var(--color-accent-gold)'
     case Rating.Good:
-      return '#4CAF50'
+      return 'var(--color-success)'
     case Rating.Easy:
-      return '#2196F3'
+      return 'var(--color-info)'
     default:
-      return '#8A8A8A'
+      return 'var(--color-text-muted)'
   }
 }
 

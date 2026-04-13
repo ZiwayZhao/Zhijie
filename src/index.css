@@ -22,6 +22,20 @@
   --color-info: #2196F3;
 }
 
+/* Dark theme overrides */
+[data-theme="dark"] {
+  --color-bg-main: #1a1a1a;
+  --color-bg-card: #242424;
+  --color-bg-accent: #2a2520;
+  --color-text-main: #e8e4de;
+  --color-text-body: #c5c0b8;
+  --color-text-muted: #7a7570;
+  --color-border-warm: #3a3530;
+  --color-red-primary: #c4354a;
+  --color-red-dark: #a5192e;
+  --color-accent-gold: #d4aa3a;
+}
+
 /* Global base styles */
 html {
   background-color: var(--color-bg-main);

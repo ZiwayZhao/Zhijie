@@ -69,7 +69,7 @@ export interface ProgressEvent {
   phase: string
   currentStep?: string
   modules?: DisassemblyModule[]
-  detail?: { completed?: number; total?: number }
+  detail?: { completed?: number; total?: number; modules?: DisassemblyModule[] }
 }
 
 export interface AnalysisResult {
@@ -153,40 +153,59 @@ export function subscribeProgress(
 ): () => void {
   if (USE_MOCK) return subscribeMockProgress(taskId, onProgress)
 
-  // Prefer SSE ticket auth; fall back to raw JWT if ticket fetch fails
   let cancelled = false
   let evtSource: EventSource | null = null
+  let retryCount = 0
+  const MAX_RETRIES = 10
+  const RETRY_DELAYS = [1000, 2000, 3000, 5000, 5000, 10000, 10000, 15000, 15000, 30000]
 
   const connect = async () => {
+    if (cancelled) return
+
     const sseUrl = new URL(`${AUTH_API}/disassembly/tasks/${taskId}/status`, window.location.origin)
 
-    // Try getting a ticket first (preferred, more secure)
+    // Prefer SSE ticket auth; fall back to raw JWT if ticket fetch fails
     try {
       const { getStreamTicket } = await import('@/lib/sync-service')
       const ticket = await getStreamTicket(taskId)
       if (ticket) {
         sseUrl.searchParams.set('ticket', ticket)
       } else {
-        // Fallback to raw JWT
         const token = getAccessToken()
         if (token) sseUrl.searchParams.set('token', token)
       }
     } catch {
-      // Fallback to raw JWT
       const token = getAccessToken()
       if (token) sseUrl.searchParams.set('token', token)
     }
 
     if (cancelled) return
-    return new EventSource(sseUrl.toString())
+
+    const es = new EventSource(sseUrl.toString())
+    evtSource = es
+
+    wireEventSource(es, taskId, onProgress, () => {
+      // On recoverable error: auto-retry with backoff
+      if (cancelled) return
+      es.close()
+      if (retryCount < MAX_RETRIES) {
+        const delay = RETRY_DELAYS[retryCount] ?? 30000
+        retryCount++
+        onProgress({
+          progress: -1, status: 'running', phase: 'unknown',
+          currentStep: `连接中断，${Math.round(delay / 1000)}秒后重试 (${retryCount}/${MAX_RETRIES})...`,
+        })
+        setTimeout(() => connect(), delay)
+      } else {
+        onProgress({ progress: 0, status: 'failed', phase: 'unknown', currentStep: '连接中断，重试次数已用尽' })
+      }
+    })
+
+    // Reset retry count on successful connection
+    es.onopen = () => { retryCount = 0 }
   }
 
-  // Connect async, then wire up handlers
-  connect().then((es) => {
-    if (!es || cancelled) { es?.close(); return }
-    evtSource = es
-    wireEventSource(es, taskId, onProgress)
-  })
+  connect()
 
   return () => { cancelled = true; evtSource?.close() }
 }
@@ -195,7 +214,9 @@ function wireEventSource(
   evtSource: EventSource,
   _taskId: string,
   onProgress: (event: ProgressEvent) => void,
+  onRetry: () => void,
 ): void {
+  let completed = false
 
   evtSource.addEventListener('status', (e) => {
     try {
@@ -205,6 +226,7 @@ function wireEventSource(
         currentStep: `${data.phase}: ${data.status}`,
       })
       if (data.status === 'completed' || data.status === 'failed' || data.status === 'cancelled') {
+        completed = true
         evtSource.close()
       }
     } catch { /* ignore malformed SSE data */ }
@@ -213,18 +235,34 @@ function wireEventSource(
   evtSource.addEventListener('progress', (e) => {
     try {
       const data = JSON.parse(e.data)
+      // Extract modules from detail if present (sent when specialist phase completes)
+      const detailModules = data.detail?.modules as DisassemblyModule[] | undefined
+      const progressModules = detailModules?.map((m: any) => ({
+        ...m,
+        pages: `${m.page_range_start}-${m.page_range_end}`,
+        examWeight: m.exam_weight,
+      }))
+      // Remove modules from detail to avoid confusing the progress display
+      const cleanDetail = data.detail ? { ...data.detail } : undefined
+      if (cleanDetail) delete cleanDetail.modules
+
       onProgress({
         progress: data.progress,
         status: data.phase === 'done' ? 'completed' : 'running',
-        phase: data.phase, currentStep: data.message, detail: data.detail,
+        phase: data.phase, currentStep: data.message,
+        detail: cleanDetail,
+        modules: progressModules,
       })
-      if (data.phase === 'done') evtSource.close()
+      if (data.phase === 'done') {
+        completed = true
+        evtSource.close()
+      }
     } catch { /* ignore */ }
   })
 
   evtSource.onerror = () => {
-    onProgress({ progress: 0, status: 'failed', phase: 'unknown', currentStep: '连接中断' })
-    evtSource.close()
+    if (completed) return
+    onRetry()
   }
 }
 

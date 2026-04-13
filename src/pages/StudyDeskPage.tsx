@@ -8,7 +8,7 @@
 import { Suspense, lazy, useState, useCallback, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { BookOpen, Upload, Loader2, AlertCircle, FileUp } from 'lucide-react'
+import { BookOpen, Upload, Loader2, AlertCircle, FileUp, PanelRightOpen, PanelRightClose } from 'lucide-react'
 import MaterialTabBar from '@/components/studydesk/MaterialTabBar'
 import { useStudyDeskData } from '@/hooks/useStudyDeskData'
 
@@ -104,7 +104,7 @@ function NoMarkdownState({
 
 export default function StudyDeskPage() {
   const { id: courseId } = useParams<{ id: string }>()
-  const [tutorCollapsed] = useState(false)
+  const [tutorCollapsed, setTutorCollapsed] = useState(false)
 
   const {
     lectures,
@@ -184,8 +184,27 @@ export default function StudyDeskPage() {
         </div>
 
         {/* Right: AI Tutor sidebar */}
-        {!tutorCollapsed && (
+        {tutorCollapsed ? (
+          <button
+            onClick={() => setTutorCollapsed(false)}
+            className="w-10 border-l border-border-warm bg-bg-card flex flex-col items-center justify-center
+                       hover:bg-bg-accent transition-colors shrink-0"
+            title="展开助教"
+          >
+            <PanelRightOpen size={16} strokeWidth={1.5} className="text-text-muted" />
+          </button>
+        ) : (
           <aside className="flex-[3] min-w-[280px] max-w-[400px] border-l border-border-warm bg-bg-card flex flex-col">
+            <div className="flex items-center justify-between px-3 py-2 border-b border-border-warm">
+              <span className="text-xs text-text-muted font-body">AI 助教</span>
+              <button
+                onClick={() => setTutorCollapsed(true)}
+                className="w-6 h-6 flex items-center justify-center text-text-muted hover:text-text-body transition-colors"
+                title="收起助教"
+              >
+                <PanelRightClose size={14} strokeWidth={1.5} />
+              </button>
+            </div>
             <Suspense fallback={<LoadingShimmer label="加载助教..." />}>
               <TutorSidebar
                 materialId={selectedLecture?.id || ''}

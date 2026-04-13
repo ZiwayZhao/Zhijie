@@ -278,7 +278,7 @@ export const perPageMdComponents: Components = createMdComponents({
     if (className?.startsWith('language-')) {
       return (
         <code
-          className="block bg-[#1a1a1a] text-[#e5e5e5] p-3 rounded-md overflow-x-auto text-[13px] font-mono my-3"
+          className="block bg-text-main text-bg-main p-3 rounded-md overflow-x-auto text-[13px] font-mono my-3"
           {...props}
         >
           {children}

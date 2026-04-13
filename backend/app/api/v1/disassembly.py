@@ -56,9 +56,9 @@ async def _get_task_or_404(
     user: User,
     db: AsyncSession,
 ) -> DisassemblyTask:
-    """Load task, verify ownership."""
+    """Load task — visible to all authenticated users (shared course materials)."""
     task = await db.get(DisassemblyTask, task_id)
-    if not task or task.user_id != user.id:
+    if not task:
         raise HTTPException(
             status_code=404,
             detail={
@@ -489,7 +489,6 @@ async def latest_analysis(
         select(DisassemblyTask)
         .where(
             DisassemblyTask.material_id == material_id,
-            DisassemblyTask.user_id == user.id,
         )
         .order_by(status_priority, DisassemblyTask.created_at.desc())
         .limit(1)

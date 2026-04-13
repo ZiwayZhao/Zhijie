@@ -4,7 +4,7 @@
  * Authenticated users see daily plan + stats; guests see CTA.
  */
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { motion, type Variants } from 'framer-motion'
 import { Clock, Flame, BookOpen, FileCheck, ArrowRight, Layers, HelpCircle } from 'lucide-react'
 import { fetchCourses, fetchShowcase, type CourseItem, type ShowcaseItem } from '@/lib/api'
@@ -240,6 +240,7 @@ function WelcomeSection() {
 
 function ShowcaseSection() {
   const [items, setItems] = useState<ShowcaseItem[]>([])
+  const navigate = useNavigate()
 
   useEffect(() => {
     fetchShowcase().then(setItems).catch(() => {})
@@ -265,7 +266,7 @@ function ShowcaseSection() {
             <div
               className="group block border-l-3 border-l-red-primary border border-border-warm rounded-md bg-bg-card p-6
                          hover:border-red-primary/60 transition-all duration-200 cursor-pointer h-full"
-              onClick={() => window.location.href = `/auth/login`}
+              onClick={() => navigate('/auth/login')}
             >
               <h3 className="font-heading text-base text-text-main mb-2 group-hover:text-red-primary transition-colors duration-200 leading-snug">
                 {item.title}

@@ -41,6 +41,9 @@ export const STORAGE_KEYS = {
   /** Mock data initialization guards */
   MOCK_FLASHCARDS_INIT: 'zhijie_mock_flashcards_initialized',
   MOCK_AGENDA_INIT: 'zhijie_mock_agenda_initialized',
+  /** User preferences (theme, fontSize, dailyGoal, etc.) */
+  USER_PREFERENCES: 'zhijie_user_preferences',
+
   /** Common prefix for all zhijie keys (used by clear-all / export) */
   PREFIX: 'zhijie_',
 } as const

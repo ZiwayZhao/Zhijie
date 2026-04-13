@@ -1,4 +1,6 @@
 import { useState, type ReactNode } from 'react'
+import { useLocation } from 'react-router-dom'
+import { motion, AnimatePresence } from 'framer-motion'
 import Sidebar from '@/components/layout/Sidebar'
 import Header from '@/components/layout/Header'
 
@@ -8,6 +10,7 @@ interface LayoutProps {
 
 export default function Layout({ children }: LayoutProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const location = useLocation()
 
   return (
     <div className="flex min-h-screen bg-bg-main">
@@ -29,7 +32,18 @@ export default function Layout({ children }: LayoutProps) {
 
       <div className="flex-1 flex flex-col min-w-0">
         <Header onMenuToggle={() => setMobileMenuOpen((v) => !v)} />
-        <main className="flex-1">{children}</main>
+        <AnimatePresence mode="wait">
+          <motion.main
+            key={location.pathname}
+            className="flex-1"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.15 }}
+          >
+            {children}
+          </motion.main>
+        </AnimatePresence>
       </div>
     </div>
   )

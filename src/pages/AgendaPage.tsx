@@ -76,10 +76,10 @@ export default function AgendaPage() {
   const [newTodo, setNewTodo] = useState('')
   const todosRef = useRef<TodoItem[]>([])
 
-  const rebuildAgenda = useCallback((currentTodos: TodoItem[]) => {
+  const rebuildAgenda = useCallback((currentTodos: TodoItem[], date?: Date) => {
     const decks = loadAllDecks()
     const configs = loadExamConfigs()
-    const daily = generateDailyAgenda(decks, configs, [], currentTodos)
+    const daily = generateDailyAgenda(decks, configs, [], currentTodos, date)
     setAgenda(daily)
     setExamConfigs(configs)
   }, [])
@@ -87,8 +87,8 @@ export default function AgendaPage() {
   useEffect(() => {
     const loadedTodos = loadTodos()
     todosRef.current = loadedTodos
-    rebuildAgenda(loadedTodos)
-  }, [rebuildAgenda])
+    rebuildAgenda(loadedTodos, selectedDate)
+  }, [rebuildAgenda, selectedDate])
 
   const handleToggleComplete = useCallback((id: string) => {
     const updated = todosRef.current.map((t) =>
@@ -96,8 +96,8 @@ export default function AgendaPage() {
     )
     todosRef.current = updated
     saveTodos(updated)
-    rebuildAgenda(updated)
-  }, [rebuildAgenda])
+    rebuildAgenda(updated, selectedDate)
+  }, [rebuildAgenda, selectedDate])
 
   const handleAddTodo = useCallback(() => {
     const title = newTodo.trim()
@@ -111,9 +111,9 @@ export default function AgendaPage() {
     const updated = [...todosRef.current, todo]
     todosRef.current = updated
     saveTodos(updated)
-    rebuildAgenda(updated)
+    rebuildAgenda(updated, selectedDate)
     setNewTodo('')
-  }, [newTodo, rebuildAgenda])
+  }, [newTodo, rebuildAgenda, selectedDate])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {

@@ -6,6 +6,10 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Send, Loader2, RotateCcw } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
+import remarkMath from 'remark-math'
+import remarkGfm from 'remark-gfm'
+import rehypeKatex from 'rehype-katex'
 import { useTutorSession } from '@/hooks/useTutorSession'
 import type { TutorPhase } from '@/hooks/useTutorSession'
 import TutorMessage from '@/components/tutor/TutorMessage'
@@ -247,17 +251,22 @@ export default function TutorSidebar({
           phase={state.phase}
         />
 
-        {/* Streaming content (live) */}
+        {/* Streaming content (live) — rendered as Markdown for LaTeX/code support */}
         {state.streamingContent && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             className="mb-4 pl-3 border-l-3 border-l-red-primary"
           >
-            <p className="text-[13px] text-text-body leading-relaxed whitespace-pre-wrap">
-              {state.streamingContent}
-              <span className="inline-block w-1.5 h-4 bg-red-primary/60 ml-0.5 animate-pulse" />
-            </p>
+            <div className="text-[13px] text-text-body leading-relaxed prose-sm">
+              <ReactMarkdown
+                remarkPlugins={[remarkMath, remarkGfm]}
+                rehypePlugins={[rehypeKatex]}
+              >
+                {state.streamingContent}
+              </ReactMarkdown>
+              <span className="inline-block w-1.5 h-4 bg-red-primary/60 ml-0.5 animate-pulse align-middle" />
+            </div>
           </motion.div>
         )}
 

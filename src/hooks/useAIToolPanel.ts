@@ -97,6 +97,7 @@ export type AIToolPanelAction =
   | { type: 'TOOL_ERROR'; error: string }
   | { type: 'CLEAR_TOOL_RESULT' }
   | { type: 'TOGGLE_MANUAL' }
+  | { type: 'MODULES_AVAILABLE'; modules: DisassemblyModule[] }
   | { type: 'RESTORE_COMPLETE'; modules: DisassemblyModule[] }
   | { type: 'RESET' }
 
@@ -199,7 +200,8 @@ function reducer(state: AIToolPanelState, action: AIToolPanelAction): AIToolPane
     case 'UPDATE_PROGRESS':
       return {
         ...state,
-        progress: action.progress,
+        // progress=-1 means SSE reconnecting — keep previous progress value
+        progress: action.progress >= 0 ? action.progress : state.progress,
         currentStep: action.currentStep ?? state.currentStep,
         pipelinePhase: action.pipelinePhase ?? state.pipelinePhase,
         progressDetail: action.detail ?? state.progressDetail,
@@ -243,6 +245,15 @@ function reducer(state: AIToolPanelState, action: AIToolPanelAction): AIToolPane
 
     case 'TOGGLE_MANUAL':
       return { ...state, manualExpanded: !state.manualExpanded }
+
+    case 'MODULES_AVAILABLE':
+      // Modules arrived while still processing — show them alongside progress
+      // Transition to 'complete' so user can browse modules while pipeline finishes
+      return {
+        ...state,
+        phase: 'complete',
+        modules: action.modules,
+      }
 
     case 'RESTORE_COMPLETE':
       return {
@@ -305,6 +316,73 @@ function generatePlanSteps(
   })
 }
 
+/* ── SSE progress handler factory ───────────────────── */
+
+/**
+ * Creates a progress event handler that dispatches state updates
+ * and handles modules arriving mid-pipeline (specialist done).
+ */
+function createProgressHandler(
+  taskId: string,
+  materialId: string,
+  intent: Intent,
+  dispatch: React.Dispatch<AIToolPanelAction>,
+  onQuizReadyRef: React.RefObject<((qs: MCQuestion[]) => void) | undefined>,
+  onKnowledgeCardsReadyRef: React.RefObject<((data: import('@/lib/types/knowledge-card').KnowledgeCardResult) => void) | undefined>,
+  modulesDeliveredRef: React.MutableRefObject<boolean>,
+) {
+  return (evt: ProgressEvent) => {
+    dispatch({
+      type: 'UPDATE_PROGRESS',
+      progress: evt.progress,
+      currentStep: evt.currentStep,
+      pipelinePhase: evt.phase as PipelinePhase | undefined,
+      detail: evt.detail,
+    })
+
+    // Modules arrived mid-pipeline (specialist complete, cards/examiner still running)
+    if (evt.modules?.length && !modulesDeliveredRef.current) {
+      modulesDeliveredRef.current = true
+      saveAnalysisCache(materialId, taskId, evt.modules)
+      dispatch({ type: 'MODULES_AVAILABLE', modules: evt.modules })
+      showToast(`精讲已完成，发现 ${evt.modules.length} 个知识模块（测验仍在生成中）`)
+    }
+
+    if (evt.status === 'completed') {
+      getAnalysisResult(taskId).then((result) => {
+        const mods = result.modules as DisassemblyModule[]
+        const studentProfile = loadProfile()
+        const steps = generatePlanSteps(mods, intent, studentProfile)
+        saveAnalysisCache(materialId, taskId, mods)
+        // Only dispatch PROCESSING_COMPLETE if modules weren't already shown
+        if (!modulesDeliveredRef.current) {
+          dispatch({ type: 'PROCESSING_COMPLETE', modules: mods, planSteps: steps })
+        } else {
+          // Modules already shown — just update them (may have more accurate data now)
+          dispatch({ type: 'RESTORE_COMPLETE', modules: mods })
+        }
+        showToast(`课件分析完成，发现 ${mods.length} 个知识模块`)
+        if (result.knowledge_cards) {
+          onKnowledgeCardsReadyRef.current?.(result.knowledge_cards)
+        } else {
+          getKnowledgeCards(taskId)
+            .then((data) => { onKnowledgeCardsReadyRef.current?.(data) })
+            .catch(() => {})
+        }
+        if (result.quiz?.questions.length) {
+          onQuizReadyRef.current?.(result.quiz.questions)
+        }
+      }).catch(() => {
+        dispatch({ type: 'PROCESSING_ERROR', errorMsg: '获取分析结果失败' })
+      })
+    }
+
+    if (evt.status === 'failed') {
+      dispatch({ type: 'PROCESSING_ERROR', errorMsg: evt.currentStep ?? '分析过程中出现错误' })
+    }
+  }
+}
+
 /* ── Hook ───────────────────────────────────────────── */
 
 interface UseAIToolPanelOptions {
@@ -338,6 +416,7 @@ export function useAIToolPanel({
   const taskIdRef = useRef<string | null>(null)
   const unsubRef = useRef<(() => void) | null>(null)
   const skipAutoDetectRef = useRef(false)
+  const modulesDeliveredRef = useRef(false)
   const onQuizReadyRef = useRef(onQuizReady)
   onQuizReadyRef.current = onQuizReady
   const onKnowledgeCardsReadyRef = useRef(onKnowledgeCardsReady)
@@ -402,38 +481,15 @@ export function useAIToolPanel({
       if (task.status === 'running' || task.status === 'pending') {
         if (cancelled || skipAutoDetectRef.current) return
         taskIdRef.current = task.task_id
+        modulesDeliveredRef.current = false
         dispatch({ type: 'START_PROCESSING' })
-        unsubRef.current = subscribeProgress(task.task_id, (evt: ProgressEvent) => {
-          dispatch({
-            type: 'UPDATE_PROGRESS',
-            progress: evt.progress,
-            currentStep: evt.currentStep,
-            pipelinePhase: evt.phase as PipelinePhase | undefined,
-            detail: evt.detail,
-          })
-          if (evt.status === 'completed') {
-            getAnalysisResult(task.task_id).then((result) => {
-              const mods = result.modules as DisassemblyModule[]
-              const studentProfile = loadProfile()
-              const steps = generatePlanSteps(mods, 'learn', studentProfile)
-              saveAnalysisCache(materialId, task.task_id, mods)
-              dispatch({ type: 'PROCESSING_COMPLETE', modules: mods, planSteps: steps })
-              showToast(`课件分析完成，发现 ${mods.length} 个知识模块`)
-              if (result.knowledge_cards) {
-                onKnowledgeCardsReadyRef.current?.(result.knowledge_cards)
-              } else {
-                getKnowledgeCards(task.task_id)
-                  .then((data) => { onKnowledgeCardsReadyRef.current?.(data) })
-                  .catch(() => {})
-              }
-            }).catch(() => {
-              dispatch({ type: 'PROCESSING_ERROR', errorMsg: '获取分析结果失败' })
-            })
-          }
-          if (evt.status === 'failed') {
-            dispatch({ type: 'PROCESSING_ERROR', errorMsg: evt.currentStep ?? '分析过程中出现错误' })
-          }
-        })
+        unsubRef.current = subscribeProgress(
+          task.task_id,
+          createProgressHandler(
+            task.task_id, materialId, 'learn', dispatch,
+            onQuizReadyRef, onKnowledgeCardsReadyRef, modulesDeliveredRef,
+          ),
+        )
         return
       }
 
@@ -476,42 +532,15 @@ export function useAIToolPanel({
         referenceMaterialIds: data.referenceMaterialIds,
       })
       taskIdRef.current = taskId
+      modulesDeliveredRef.current = false
 
-      unsubRef.current = subscribeProgress(taskId, (evt: ProgressEvent) => {
-        dispatch({
-          type: 'UPDATE_PROGRESS',
-          progress: evt.progress,
-          currentStep: evt.currentStep,
-          pipelinePhase: evt.phase as PipelinePhase | undefined,
-          detail: evt.detail,
-        })
-
-        if (evt.status === 'completed') {
-          getAnalysisResult(taskId).then((result) => {
-            const mods = result.modules as DisassemblyModule[]
-            const studentProfile = loadProfile()
-            const steps = generatePlanSteps(mods, intent, studentProfile)
-            // Persist to localStorage so future mounts restore instantly
-            saveAnalysisCache(materialId, taskId, mods)
-            dispatch({ type: 'PROCESSING_COMPLETE', modules: mods, planSteps: steps })
-            showToast(`课件分析完成，发现 ${mods.length} 个知识模块`)
-            // Load knowledge cards (non-blocking)
-            if (result.knowledge_cards) {
-              onKnowledgeCardsReadyRef.current?.(result.knowledge_cards)
-            } else {
-              getKnowledgeCards(taskId)
-                .then((data) => { onKnowledgeCardsReadyRef.current?.(data) })
-                .catch(() => {})
-            }
-          }).catch(() => {
-            dispatch({ type: 'PROCESSING_ERROR', errorMsg: '获取分析结果失败' })
-          })
-        }
-
-        if (evt.status === 'failed') {
-          dispatch({ type: 'PROCESSING_ERROR', errorMsg: evt.currentStep ?? '分析过程中出现错误' })
-        }
-      })
+      unsubRef.current = subscribeProgress(
+        taskId,
+        createProgressHandler(
+          taskId, materialId, intent, dispatch,
+          onQuizReadyRef, onKnowledgeCardsReadyRef, modulesDeliveredRef,
+        ),
+      )
     } catch (err) {
       const msg = err instanceof Error ? err.message : '启动失败'
       // If analysis already exists, try to load or subscribe to progress
@@ -539,38 +568,15 @@ export function useAIToolPanel({
           // Running/pending → subscribe to progress instead of showing error
           if (task && (task.status === 'running' || task.status === 'pending')) {
             taskIdRef.current = task.task_id
+            modulesDeliveredRef.current = false
             // Already dispatched START_PROCESSING at top of function, keep it
-            unsubRef.current = subscribeProgress(task.task_id, (evt: ProgressEvent) => {
-              dispatch({
-                type: 'UPDATE_PROGRESS',
-                progress: evt.progress,
-                currentStep: evt.currentStep,
-                pipelinePhase: evt.phase as PipelinePhase | undefined,
-                detail: evt.detail,
-              })
-              if (evt.status === 'completed') {
-                getAnalysisResult(task.task_id).then((result) => {
-                  const mods = result.modules as DisassemblyModule[]
-                  const studentProfile = loadProfile()
-                  const steps = generatePlanSteps(mods, intent, studentProfile)
-                  saveAnalysisCache(materialId, task.task_id, mods)
-                  dispatch({ type: 'PROCESSING_COMPLETE', modules: mods, planSteps: steps })
-                  showToast(`课件分析完成，发现 ${mods.length} 个知识模块`)
-                  if (result.knowledge_cards) {
-                    onKnowledgeCardsReadyRef.current?.(result.knowledge_cards)
-                  } else {
-                    getKnowledgeCards(task.task_id)
-                      .then((data) => { onKnowledgeCardsReadyRef.current?.(data) })
-                      .catch(() => {})
-                  }
-                }).catch(() => {
-                  dispatch({ type: 'PROCESSING_ERROR', errorMsg: '获取分析结果失败' })
-                })
-              }
-              if (evt.status === 'failed') {
-                dispatch({ type: 'PROCESSING_ERROR', errorMsg: evt.currentStep ?? '分析过程中出现错误' })
-              }
-            })
+            unsubRef.current = subscribeProgress(
+              task.task_id,
+              createProgressHandler(
+                task.task_id, materialId, intent, dispatch,
+                onQuizReadyRef, onKnowledgeCardsReadyRef, modulesDeliveredRef,
+              ),
+            )
             return
           }
         } catch { /* fall through to error */ }
@@ -641,6 +647,24 @@ export function useAIToolPanel({
     dispatch({ type: 'MODULE_LOADED' })
   }, [onModuleSelect])
 
+  // Auto-select first module when analysis completes and no module is selected yet
+  const autoSelectedRef = useRef(false)
+  useEffect(() => {
+    if (
+      state.phase === 'complete' &&
+      state.modules.length > 0 &&
+      !autoSelectedRef.current &&
+      taskIdRef.current
+    ) {
+      autoSelectedRef.current = true
+      // Auto-click first module with has_specialist
+      const firstMod = state.modules.find(m => m.has_specialist) ?? state.modules[0]
+      if (firstMod) {
+        handleModuleClick(firstMod)
+      }
+    }
+  }, [state.phase, state.modules, handleModuleClick])
+
   const handleExamConfirm = useCallback((profile: ExamProfile) => {
     dispatch({ type: 'SET_EXAM_PROFILE', profile })
     const data: GatheringData = { examProfile: profile }
@@ -661,6 +685,8 @@ export function useAIToolPanel({
     unsubRef.current = null
     taskIdRef.current = null
     skipAutoDetectRef.current = true
+    autoSelectedRef.current = false
+    modulesDeliveredRef.current = false
     clearAnalysisCache(materialId)
     dispatch({ type: 'RESET' })
     onQuizReady?.([])

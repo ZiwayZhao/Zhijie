@@ -31,12 +31,30 @@ export default function UploadPage() {
 
   /* ---------- Single file mode ---------- */
 
+  const MAX_PDF_SIZE = 50 * 1024 * 1024 // 50MB
+  const MAX_OTHER_SIZE = 20 * 1024 * 1024 // 20MB
+
   const handleFiles = useCallback((newFiles: File[]) => {
-    const uploads: UploadFile[] = newFiles.map((file) => ({
-      id: `file-${++counterRef.current}`,
-      file,
-    }))
-    setFiles((prev) => [...prev, ...uploads])
+    const uploads: UploadFile[] = []
+    const rejected: string[] = []
+
+    for (const file of newFiles) {
+      const maxSize = file.type === 'application/pdf' ? MAX_PDF_SIZE : MAX_OTHER_SIZE
+      if (file.size > maxSize) {
+        const limitMB = Math.round(maxSize / (1024 * 1024))
+        rejected.push(`${file.name}（超过 ${limitMB}MB 限制）`)
+      } else {
+        uploads.push({ id: `file-${++counterRef.current}`, file })
+      }
+    }
+
+    if (rejected.length > 0) {
+      setErrorMsg(`以下文件过大，已跳过：\n${rejected.join('\n')}`)
+    }
+
+    if (uploads.length > 0) {
+      setFiles((prev) => [...prev, ...uploads])
+    }
   }, [])
 
   const handleRemove = useCallback((id: string) => {
@@ -50,14 +68,16 @@ export default function UploadPage() {
     setProgress(0)
     setErrorMsg('')
 
-    try {
-      const total = files.length
-      for (let i = 0; i < total; i++) {
-        const f = files[i]
-        setProgressLabel(`${i + 1} / ${total}`)
-        const pctBase = Math.round((i / total) * 100)
-        setProgress(pctBase)
+    const total = files.length
+    const failed: string[] = []
 
+    for (let i = 0; i < total; i++) {
+      const f = files[i]
+      setProgressLabel(`${i + 1} / ${total}`)
+      const pctBase = Math.round((i / total) * 100)
+      setProgress(pctBase)
+
+      try {
         const contentType = f.file.type || 'application/pdf'
         const { materialId, uploadUrl } = await requestUpload({
           filename: f.file.name,
@@ -73,12 +93,17 @@ export default function UploadPage() {
         await uploadFileToS3(uploadUrl, f.file, contentType)
         setProgress(pctBase + Math.round((1 / total) * 80))
         await confirmUpload(materialId)
-        setProgress(Math.round(((i + 1) / total) * 100))
+      } catch (err) {
+        failed.push(`${f.file.name}: ${err instanceof Error ? err.message : '上传失败'}`)
       }
+      setProgress(Math.round(((i + 1) / total) * 100))
+    }
+
+    if (failed.length > 0) {
+      setErrorMsg(`${failed.length} 个文件上传失败：\n${failed.join('\n')}`)
+      setStatus(failed.length === total ? 'error' : 'done')
+    } else {
       setStatus('done')
-    } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : '上传失败，请重试')
-      setStatus('error')
     }
   }
 
@@ -105,14 +130,16 @@ export default function UploadPage() {
     setProgress(0)
     setErrorMsg('')
 
-    try {
-      const total = confirmedFiles.length
-      for (let i = 0; i < total; i++) {
-        const f = confirmedFiles[i]
-        setProgressLabel(`${i + 1} / ${total}: ${f.file.name}`)
-        const pctBase = Math.round((i / total) * 100)
-        setProgress(pctBase)
+    const total = confirmedFiles.length
+    const failed: string[] = []
 
+    for (let i = 0; i < total; i++) {
+      const f = confirmedFiles[i]
+      setProgressLabel(`${i + 1} / ${total}: ${f.file.name}`)
+      const pctBase = Math.round((i / total) * 100)
+      setProgress(pctBase)
+
+      try {
         const contentType = f.file.type || 'application/pdf'
         const { materialId, uploadUrl } = await requestUpload({
           filename: f.file.name,
@@ -128,12 +155,17 @@ export default function UploadPage() {
         await uploadFileToS3(uploadUrl, f.file, contentType)
         setProgress(pctBase + Math.round((1 / total) * 80))
         await confirmUpload(materialId)
-        setProgress(Math.round(((i + 1) / total) * 100))
+      } catch (err) {
+        failed.push(`${f.file.name}: ${err instanceof Error ? err.message : '上传失败'}`)
       }
+      setProgress(Math.round(((i + 1) / total) * 100))
+    }
+
+    if (failed.length > 0) {
+      setErrorMsg(`${failed.length} 个文件上传失败：\n${failed.join('\n')}`)
+      setStatus(failed.length === total ? 'error' : 'done')
+    } else {
       setStatus('done')
-    } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : '上传失败，请重试')
-      setStatus('error')
     }
   }
 

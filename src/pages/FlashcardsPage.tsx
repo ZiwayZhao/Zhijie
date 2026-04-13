@@ -2,18 +2,24 @@
  * FlashcardsPage — /my/flashcards
  * Lists all flashcard decks. Styled as a library card catalog.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { motion } from 'framer-motion'
+import { Plus } from 'lucide-react'
 import type { FlashcardDeck } from '@/lib/fsrs'
 import { loadAllDecks, getDueCards } from '@/lib/fsrs'
 import DeckList from '@/components/flashcard/DeckList'
+import ManualCardCreator from '@/components/flashcard/ManualCardCreator'
 
 export default function FlashcardsPage() {
   const [decks, setDecks] = useState<FlashcardDeck[]>([])
+  const [showCreator, setShowCreator] = useState(false)
+  const [creatorDeckIdx, setCreatorDeckIdx] = useState(0)
+
+  const reloadDecks = useCallback(() => setDecks(loadAllDecks()), [])
 
   useEffect(() => {
-    setDecks(loadAllDecks())
-  }, [])
+    reloadDecks()
+  }, [reloadDecks])
 
   const totalCards = decks.reduce((sum, d) => sum + d.cards.length, 0)
   const totalDue = decks.reduce((sum, d) => sum + getDueCards(d.cards).length, 0)
@@ -54,6 +60,46 @@ export default function FlashcardsPage() {
           </motion.div>
         )}
       </motion.div>
+
+      {/* Manual card creator */}
+      {decks.length > 0 && (
+        <div className="mb-6">
+          {showCreator ? (
+            <>
+              {decks.length > 1 && (
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-xs text-text-muted">添加到：</span>
+                  <select
+                    value={creatorDeckIdx}
+                    onChange={(e) => setCreatorDeckIdx(Number(e.target.value))}
+                    className="text-sm bg-bg-main border border-border-warm rounded-sm px-2 py-1
+                               text-text-body outline-none focus:border-red-primary"
+                  >
+                    {decks.map((d, i) => (
+                      <option key={d.courseId} value={i}>{d.courseName}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              <ManualCardCreator
+                deck={decks[creatorDeckIdx]}
+                onCreated={() => { reloadDecks(); setShowCreator(false) }}
+                onClose={() => setShowCreator(false)}
+              />
+            </>
+          ) : (
+            <button
+              onClick={() => setShowCreator(true)}
+              className="flex items-center gap-2 px-4 py-2 text-sm border border-border-warm
+                         text-text-muted hover:border-red-primary hover:text-red-primary
+                         transition-colors rounded-sm"
+            >
+              <Plus size={14} strokeWidth={1.5} />
+              手动新建卡片
+            </button>
+          )}
+        </div>
+      )}
 
       <DeckList decks={decks} />
     </div>

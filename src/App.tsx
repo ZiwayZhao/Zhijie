@@ -1,4 +1,5 @@
 import { Routes, Route } from 'react-router-dom'
+import { STORAGE_KEYS } from '@/lib/storage-keys'
 import Layout from '@/components/layout/Layout'
 import ProtectedRoute from '@/components/auth/ProtectedRoute'
 import HomePage from '@/pages/HomePage'
@@ -20,6 +21,19 @@ import RegisterPage from '@/pages/RegisterPage'
 
 const StudyDeskPage = lazy(() => import('@/pages/StudyDeskPage'))
 const DevBatchTestPage = lazy(() => import('@/pages/DevBatchTestPage'))
+
+// Apply saved theme/fontSize before first render to avoid flash
+;(() => {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.USER_PREFERENCES)
+    if (raw) {
+      const prefs = JSON.parse(raw)
+      if (prefs.theme === 'dark') document.documentElement.setAttribute('data-theme', 'dark')
+      const sizeMap: Record<string, string> = { '小': '14px', '标准': '16px', '大': '18px' }
+      if (prefs.fontSize && sizeMap[prefs.fontSize]) document.documentElement.style.fontSize = sizeMap[prefs.fontSize]
+    }
+  } catch { /* ignore */ }
+})()
 
 export default function App() {
   return (

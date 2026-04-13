@@ -222,11 +222,12 @@ async def _run_pipeline_async(task_id_str: str):
 
                 await session.commit()
 
+            first_module_name = plan.modules[0].name if plan.modules else ""
             await _update_task(session, task_id, phase="specialist", progress=0.40)
             _publish_progress(
                 redis_client, task_id_str, "specialist", 0.40,
                 f"正在生成 {len(plan.modules)} 个模块精讲...",
-                {"completed": 0, "total": len(plan.modules)},
+                {"completed": 0, "total": len(plan.modules), "current_module": first_module_name},
             )
 
             # ── Phase 3: SPECIALIST ───────────────────────────
@@ -250,19 +251,45 @@ async def _run_pipeline_async(task_id_str: str):
                 logger.info("Phase 3 skip: all specialist outputs exist")
             else:
                 completed_count = len(existing_specialists)
+                import time as _time
+                _specialist_start = _time.monotonic()
+                _module_times: list[float] = []
 
                 async def on_module_done(completed: int, total: int):
                     nonlocal completed_count
                     completed_count = completed + len(existing_specialists)
                     progress = 0.40 + (completed_count / len(db_modules)) * 0.40
                     clamped = min(progress, 0.80)
+
+                    # Track per-module timing for ETA
+                    elapsed = _time.monotonic() - _specialist_start
+                    _module_times.append(elapsed)
+                    avg_per_module = elapsed / completed if completed > 0 else 0
+                    remaining = total - completed
+                    eta_seconds = int(avg_per_module * remaining)
+
+                    # Figure out which module is being processed next
+                    next_module_name = ""
+                    if remaining > 0 and completed_count < len(db_modules):
+                        # Find next unfinished module name
+                        for m in db_modules:
+                            if m.sort_order not in existing_specialists and m.sort_order >= completed_count:
+                                next_module_name = m.name or ""
+                                break
+
+                    detail = {
+                        "completed": completed_count,
+                        "total": len(db_modules),
+                        "eta_seconds": eta_seconds,
+                        "current_module": next_module_name,
+                    }
+
                     # Persist progress to DB (reconnection safety)
                     await _update_task(session, task_id, progress=clamped)
+                    msg = f"正在生成模块 {completed_count}/{len(db_modules)} 精讲..."
                     _publish_progress(
                         redis_client, task_id_str, "specialist",
-                        clamped,
-                        f"正在生成模块 {completed_count}/{len(db_modules)} 精讲...",
-                        {"completed": completed_count, "total": len(db_modules)},
+                        clamped, msg, detail,
                     )
 
                 async def on_module_result(idx: int, spec_llm_result):
@@ -309,7 +336,32 @@ async def _run_pipeline_async(task_id_str: str):
 
             # ── Phase 3.5: KNOWLEDGE CARDS ────────────────────
             await _update_task(session, task_id, phase="knowledge-cards", progress=0.82)
-            _publish_progress(redis_client, task_id_str, "knowledge-cards", 0.82, "正在生成知识卡片...")
+
+            # Include modules in progress event so frontend can show them
+            # while knowledge-cards and examiner are still running
+            all_mods_for_progress = (await session.execute(
+                select(DisassemblyModule)
+                .where(DisassemblyModule.task_id == task_id)
+                .order_by(DisassemblyModule.sort_order)
+            )).scalars().all()
+            modules_payload = [
+                {
+                    "id": str(m.id),
+                    "name": m.name,
+                    "description": m.description,
+                    "page_range_start": m.page_range_start,
+                    "page_range_end": m.page_range_end,
+                    "exam_weight": m.exam_weight,
+                    "sort_order": m.sort_order,
+                    "has_specialist": True,
+                }
+                for m in all_mods_for_progress
+            ]
+            _publish_progress(
+                redis_client, task_id_str, "knowledge-cards", 0.82,
+                "精讲已完成，正在生成知识卡片...",
+                detail={"modules": modules_payload},
+            )
 
             # Idempotent: check if knowledge cards exist
             existing_cards = (await session.execute(

@@ -171,6 +171,22 @@ class LLMClient:
         if run_id is None:
             run_id = uuid.uuid4().hex
 
+        # Skip function calling for providers that don't support it well.
+        # glm-4.7 via yunwu.ai returns empty tool_calls after ~10min timeout,
+        # wasting time before falling back to JSON mode anyway.
+        base_url = self._custom_base_url or settings.llm_base_url or ""
+        skip_fc = any(k in base_url for k in ("yunwu.ai",)) or model.startswith("glm-")
+        if skip_fc:
+            logger.info(
+                "Skipping function calling for %s (base_url=%s), using JSON prompt mode directly",
+                model, base_url[:60],
+            )
+            return await self._structured_output_json_prompt(
+                model=model, system=system, messages=messages,
+                response_schema=response_schema, prompt_version=prompt_version,
+                max_tokens=max_tokens, run_id=run_id, max_retries=max_retries,
+            )
+
         try:
             return await self._structured_output_function_calling(
                 model=model, system=system, messages=messages,
@@ -253,7 +269,19 @@ class LLMClient:
                     lines = [l for l in lines if not l.strip().startswith("```")]
                     text = "\n".join(lines)
 
-                raw_args = json.loads(text, strict=False)
+                try:
+                    raw_args = json.loads(text, strict=False)
+                except json.JSONDecodeError:
+                    # Fix invalid JSON escapes from LLM (e.g. \g, \m, \S)
+                    # by escaping lone backslashes that aren't valid JSON escapes
+                    import re
+                    fixed = re.sub(
+                        r'\\(?!["\\/bfnrtu])',
+                        r'\\\\',
+                        text,
+                    )
+                    raw_args = json.loads(fixed, strict=False)
+
                 raw_args = _fix_double_serialized(raw_args)
                 parsed = response_schema.model_validate(raw_args)
 
@@ -389,7 +417,17 @@ class LLMClient:
 
                 # Parse JSON arguments (strict=False tolerates unescaped control chars
                 # returned by some providers like hunyuan-turbos)
-                raw_args = json.loads(tool_call.function.arguments, strict=False)
+                try:
+                    raw_args = json.loads(tool_call.function.arguments, strict=False)
+                except json.JSONDecodeError:
+                    # Fix invalid JSON escapes from LLM (e.g. \g, \m, \S)
+                    import re
+                    fixed = re.sub(
+                        r'\\(?!["\\/bfnrtu])',
+                        r'\\\\',
+                        tool_call.function.arguments,
+                    )
+                    raw_args = json.loads(fixed, strict=False)
                 logger.info("Parsed args keys: %s", list(raw_args.keys()))
 
                 # Fix double-serialized fields (OpenRouter sometimes returns

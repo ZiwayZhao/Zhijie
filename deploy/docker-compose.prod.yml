@@ -1,3 +1,6 @@
+# 生产环境 Docker Compose
+# 用法: docker compose -f docker-compose.prod.yml up -d
+
 services:
   api:
     build: .
@@ -10,10 +13,13 @@ services:
         condition: service_healthy
     env_file: .env
     environment:
+      # 只放基础设施连接串，业务配置(LLM/CORS/SECRET)全在 .env
       DATABASE_URL: postgresql+asyncpg://zhijie:zhijie@db:5432/zhijie
       REDIS_URL: redis://redis:6379
       S3_ENDPOINT_URL: http://minio:9000
+    # 生产环境: 不挂载源码, 不用 --reload
     command: uvicorn app.main:app --host 0.0.0.0 --port 8003 --workers 2
+    restart: always
 
   worker:
     build: .
@@ -24,10 +30,12 @@ services:
         condition: service_healthy
     env_file: .env
     environment:
+      # 只放基础设施连接串，业务配置(LLM/CORS/SECRET)全在 .env
       DATABASE_URL: postgresql+asyncpg://zhijie:zhijie@db:5432/zhijie
       REDIS_URL: redis://redis:6379
       S3_ENDPOINT_URL: http://minio:9000
-    command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=4
+    command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=2
+    restart: always
 
   db:
     image: postgres:16.4-alpine
@@ -44,6 +52,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    restart: always
 
   redis:
     image: redis:7.4-alpine
@@ -55,6 +64,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+    restart: always
 
   minio:
     image: minio/minio:RELEASE.2025-02-28T09-55-16Z
@@ -63,7 +73,7 @@ services:
       - "127.0.0.1:9003:9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
     volumes:
       - miniodata:/data
     command: server /data --console-address ":9001"
@@ -72,6 +82,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+    restart: always
 
 volumes:
   pgdata:

@@ -7,18 +7,18 @@
  * vertical timeline with connecting lines, no shadows.
  */
 import { motion } from 'framer-motion'
-import { FileText, Layers, BookOpen, ClipboardCheck, Check, X, Loader2 } from 'lucide-react'
+import { FileText, Layers, BookOpen, ClipboardCheck, Check, X, Loader2, Sparkles } from 'lucide-react'
 import type { ReactNode } from 'react'
 
 /* ---------- Types ---------- */
 
-export type PipelinePhase = 'init' | 'parsing' | 'cartographer' | 'specialist' | 'examiner' | 'done'
+export type PipelinePhase = 'init' | 'parsing' | 'cartographer' | 'specialist' | 'knowledge-cards' | 'examiner' | 'done'
 
 interface ProcessingViewProps {
   phase: PipelinePhase
   progress: number
   message: string
-  detail?: { completed?: number; total?: number }
+  detail?: { completed?: number; total?: number; eta_seconds?: number; current_module?: string }
   error?: string
 }
 
@@ -34,10 +34,11 @@ const PHASES: PhaseConfig[] = [
   { key: 'parsing', label: '解析文档', icon: <FileText size={16} /> },
   { key: 'cartographer', label: '分析结构', icon: <Layers size={16} /> },
   { key: 'specialist', label: '生成精讲', icon: <BookOpen size={16} /> },
+  { key: 'knowledge-cards', label: '生成知识卡片', icon: <Sparkles size={16} /> },
   { key: 'examiner', label: '生成测验', icon: <ClipboardCheck size={16} /> },
 ]
 
-const PHASE_ORDER: PipelinePhase[] = ['parsing', 'cartographer', 'specialist', 'examiner', 'done']
+const PHASE_ORDER: PipelinePhase[] = ['parsing', 'cartographer', 'specialist', 'knowledge-cards', 'examiner', 'done']
 
 function getPhaseIndex(phase: PipelinePhase): number {
   const idx = PHASE_ORDER.indexOf(phase)
@@ -64,16 +65,27 @@ function getNodeState(
 
 /* ---------- Timeline Node ---------- */
 
+function formatEta(seconds: number): string {
+  if (seconds <= 0) return ''
+  if (seconds < 60) return `约 ${seconds} 秒`
+  const mins = Math.ceil(seconds / 60)
+  return `约 ${mins} 分钟`
+}
+
 function TimelineNode({
   config,
   state,
   isLast,
   subProgress,
+  currentModule,
+  etaSeconds,
 }: {
   config: PhaseConfig
   state: NodeState
   isLast: boolean
   subProgress?: string
+  currentModule?: string
+  etaSeconds?: number
 }) {
   return (
     <div className="flex gap-3">
@@ -115,8 +127,9 @@ function TimelineNode({
         {!isLast && (
           <div
             className={`
-              w-[2px] h-8 transition-colors duration-500
+              w-[2px] transition-colors duration-500
               ${state === 'completed' ? 'bg-red-primary' : 'bg-border-warm border-dashed'}
+              ${state === 'active' && (subProgress || currentModule) ? 'h-12' : 'h-8'}
             `}
           />
         )}
@@ -144,11 +157,21 @@ function TimelineNode({
           <motion.div
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
-            className="flex items-center gap-1.5 mt-1"
+            className="mt-1 space-y-0.5"
           >
-            <Loader2 size={12} className="animate-spin text-red-primary" />
-            {subProgress && (
-              <span className="text-xs text-text-muted font-mono">{subProgress}</span>
+            <div className="flex items-center gap-1.5">
+              <Loader2 size={12} className="animate-spin text-red-primary shrink-0" />
+              {subProgress && (
+                <span className="text-xs text-text-muted font-mono">{subProgress}</span>
+              )}
+              {etaSeconds != null && etaSeconds > 0 && (
+                <span className="text-xs text-text-muted">· {formatEta(etaSeconds)}</span>
+              )}
+            </div>
+            {currentModule && (
+              <p className="text-[11px] text-text-muted truncate max-w-[200px] pl-[18px]" title={currentModule}>
+                ▸ {currentModule}
+              </p>
             )}
           </motion.div>
         )}
@@ -198,9 +221,12 @@ export default function ProcessingView({
       <div className="pl-1">
         {PHASES.map((cfg, i) => {
           const state = getNodeState(cfg.key, phase, hasError)
-          const isSpecialist = cfg.key === 'specialist' && state === 'active' && detail
-          const subText = isSpecialist
-            ? `${detail?.completed ?? 0}/${detail?.total ?? '?'} 模块`
+          const isActive = state === 'active'
+          const hasDetail = isActive && detail
+
+          // Sub-progress text (e.g. "3/6 模块")
+          const subText = hasDetail && detail.total
+            ? `${detail.completed ?? 0}/${detail.total} 模块`
             : undefined
 
           return (
@@ -210,6 +236,8 @@ export default function ProcessingView({
               state={state}
               isLast={i === PHASES.length - 1}
               subProgress={subText}
+              currentModule={hasDetail ? detail.current_module : undefined}
+              etaSeconds={hasDetail ? detail.eta_seconds : undefined}
             />
           )
         })}

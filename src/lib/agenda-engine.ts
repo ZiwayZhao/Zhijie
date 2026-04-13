@@ -88,12 +88,12 @@ function estimateReviewMinutes(dueCount: number): number {
   return Math.max(1, Math.ceil(dueCount / 3))
 }
 
-export function getFlashcardAgendaItems(decks: FlashcardDeck[]): FlashcardReviewItem[] {
+export function getFlashcardAgendaItems(decks: FlashcardDeck[], targetDate?: Date): FlashcardReviewItem[] {
   const items: FlashcardReviewItem[] = []
-  const now = new Date()
+  const cutoff = targetDate ?? new Date()
 
   for (const deck of decks) {
-    const due = getDueCards(deck.cards, now)
+    const due = getDueCards(deck.cards, cutoff)
     if (due.length > 0) {
       items.push({
         type: 'flashcard-review',
@@ -110,13 +110,13 @@ export function getFlashcardAgendaItems(decks: FlashcardDeck[]): FlashcardReview
   return items
 }
 
-export function getExamPrepItems(configs: ExamConfig[]): ExamPrepItem[] {
+export function getExamPrepItems(configs: ExamConfig[], targetDate?: Date): ExamPrepItem[] {
   const items: ExamPrepItem[] = []
-  const today = new Date()
+  const refDate = targetDate ?? new Date()
 
   for (const config of configs) {
     const examDate = new Date(config.examDate)
-    const daysLeft = differenceInDays(examDate, today)
+    const daysLeft = differenceInDays(examDate, refDate)
 
     if (daysLeft >= 0 && daysLeft <= 14) {
       const estimatedMin = daysLeft <= 3 ? 30 : daysLeft <= 7 ? 20 : 15
@@ -248,9 +248,11 @@ export function generateDailyAgenda(
   examConfigs: ExamConfig[],
   studyItems: StudyItem[],
   todos: TodoItem[],
+  targetDate?: Date,
 ): DailyAgenda {
-  const fcItems = getFlashcardAgendaItems(decks)
-  const examItems = getExamPrepItems(examConfigs)
+  const refDate = targetDate ?? new Date()
+  const fcItems = getFlashcardAgendaItems(decks, refDate)
+  const examItems = getExamPrepItems(examConfigs, refDate)
 
   const allItems: AgendaItem[] = [...examItems, ...fcItems, ...studyItems, ...todos]
   const sorted = sortAgendaItems(allItems)
@@ -261,7 +263,7 @@ export function generateDailyAgenda(
   }, 0)
 
   return {
-    date: format(new Date(), 'yyyy-MM-dd'),
+    date: format(refDate, 'yyyy-MM-dd'),
     items: sorted,
     totalMinutes,
   }

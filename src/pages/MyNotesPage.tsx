@@ -102,11 +102,13 @@ function NoteGroup({
   entries,
   groupIndex,
   materialId,
+  courseId,
 }: {
   title: string
   entries: NoteEntry[]
   groupIndex: number
   materialId?: string
+  courseId?: string
 }) {
   const [expanded, setExpanded] = useState(true)
 
@@ -131,7 +133,7 @@ function NoteGroup({
         <span className="text-[11px] text-text-muted shrink-0">{entries.length} 条</span>
         {materialId && (
           <Link
-            to={`/course/default/material/${materialId}`}
+            to={`/course/${courseId || 'default'}/material/${materialId}`}
             onClick={(e) => e.stopPropagation()}
             className="text-[10px] text-red-primary hover:underline shrink-0 ml-1"
           >
@@ -350,6 +352,7 @@ export default function MyNotesPage() {
                 entries={entries}
                 groupIndex={i}
                 materialId={groupBy === 'material' ? entries[0]?.materialId : undefined}
+                courseId={groupBy === 'material' ? entries[0]?.courseId : undefined}
               />
             ))}
           </div>

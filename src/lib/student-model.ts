@@ -313,10 +313,10 @@ export function getMasteryLabel(level: MasteryLevel): string {
 
 export function getMasteryColor(level: MasteryLevel): string {
   switch (level) {
-    case 'beginner': return '#A5192E'
-    case 'developing': return '#C49A2A'
-    case 'proficient': return '#4CAF50'
-    case 'expert': return '#2196F3'
+    case 'beginner': return 'var(--color-red-primary)'
+    case 'developing': return 'var(--color-accent-gold)'
+    case 'proficient': return 'var(--color-success)'
+    case 'expert': return 'var(--color-info)'
   }
 }
 

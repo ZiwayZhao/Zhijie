@@ -100,7 +100,7 @@ function RatingButton({
       onMouseEnter={(e) => {
         const el = e.currentTarget
         el.style.backgroundColor = style.hoverBg
-        el.style.color = '#FFFEFB'
+        el.style.color = 'var(--color-bg-card)'
         el.style.borderColor = style.hoverBg
       }}
       onMouseLeave={(e) => {
@@ -281,6 +281,22 @@ export default function ReviewSession({ deck, dueCards, onComplete }: ReviewSess
     [currentCard, currentIdx, deck, dueCards.length],
   )
 
+  // Keyboard shortcuts: Space = flip, 1-4 = rate
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (completed) return
+      if (e.key === ' ' || e.key === 'Spacebar') {
+        e.preventDefault()
+        if (!isFlipped) setIsFlipped(true)
+      } else if (isFlipped && e.key >= '1' && e.key <= '4') {
+        e.preventDefault()
+        handleRating(Number(e.key) as 1 | 2 | 3 | 4)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isFlipped, completed, handleRating])
+
   if (completed) {
     return <CompletionScreen stats={stats} deck={deck} onClose={onComplete} />
   }
@@ -337,7 +353,13 @@ export default function ReviewSession({ deck, dueCards, onComplete }: ReviewSess
 
       {!isFlipped && (
         <p className="text-center text-text-muted text-xs mt-8 tracking-wide">
-          点击卡片查看答案，然后选择掌握程度
+          点击卡片或按 <kbd className="px-1.5 py-0.5 border border-border-warm rounded text-[10px] font-mono">Space</kbd> 查看答案
+        </p>
+      )}
+
+      {isFlipped && (
+        <p className="text-center text-text-muted text-[10px] mt-3 tracking-wide">
+          快捷键：<kbd className="px-1 py-0.5 border border-border-warm rounded font-mono">1</kbd> 忘记 · <kbd className="px-1 py-0.5 border border-border-warm rounded font-mono">2</kbd> 困难 · <kbd className="px-1 py-0.5 border border-border-warm rounded font-mono">3</kbd> 记得 · <kbd className="px-1 py-0.5 border border-border-warm rounded font-mono">4</kbd> 简单
         </p>
       )}
     </div>

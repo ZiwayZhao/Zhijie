@@ -161,10 +161,10 @@ async def list_materials(
     limit: int = Query(20, ge=1, le=100),
     course_id: uuid.UUID | None = None,
 ):
-    """List current user's materials (excludes soft-deleted)."""
-    query = select(Material).where(Material.user_id == user.id, Material.deleted_at.is_(None))
+    """List all materials visible to authenticated users (excludes soft-deleted)."""
+    query = select(Material).where(Material.deleted_at.is_(None))
     count_query = select(func.count()).select_from(Material).where(
-        Material.user_id == user.id, Material.deleted_at.is_(None)
+        Material.deleted_at.is_(None)
     )
 
     if course_id:
@@ -198,11 +198,10 @@ async def get_material(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get a single material with download URL."""
+    """Get a single material with download URL (visible to all authenticated users)."""
     result = await db.execute(
         select(Material).where(
             Material.id == material_id,
-            Material.user_id == user.id,
             Material.deleted_at.is_(None),
         )
     )

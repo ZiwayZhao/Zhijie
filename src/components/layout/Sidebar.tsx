@@ -84,6 +84,7 @@ export default function Sidebar({ mobile, onClose }: SidebarProps) {
           <button
             onClick={onClose}
             className="p-1 text-text-muted hover:text-text-main transition-colors"
+            aria-label="关闭侧边栏"
           >
             <X size={18} />
           </button>
@@ -91,7 +92,7 @@ export default function Sidebar({ mobile, onClose }: SidebarProps) {
       </div>
 
       {/* Navigation — table-of-contents style */}
-      <nav className="flex-1 min-h-0 py-4 space-y-1 overflow-y-auto">
+      <nav aria-label="主导航" className="flex-1 min-h-0 py-4 space-y-1 overflow-y-auto">
         <div className="space-y-0.5">
           {mainNav.map((item) => (
             <NavItem key={item.to} {...item} onClick={mobile ? onClose : undefined} />

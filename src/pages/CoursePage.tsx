@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { motion, type Variants } from 'framer-motion'
-import { BookMarked, Users, Star, Globe, ExternalLink, Upload, Clock, Code2, GraduationCap, FileText, Video, FileCode, File, SplitSquareHorizontal } from 'lucide-react'
-import { fetchCourse, fetchCourses, fetchCourseResources, type CourseItem, type CourseResourceItem } from '@/lib/api'
+import { BookMarked, Users, Star, Globe, ExternalLink, Upload, Clock, Code2, GraduationCap, FileText, Video, FileCode, File, SplitSquareHorizontal, UserPlus, UserMinus } from 'lucide-react'
+import { fetchCourse, fetchCourses, fetchCourseResources, fetchMaterials, type CourseItem, type CourseResourceItem, type MaterialItem } from '@/lib/api'
+import { enrollCourse, unenrollCourse, isEnrolled } from '@/pages/MyCoursesPage'
 
 /** Only allow http/https URLs to prevent javascript:/data: XSS */
 function isSafeUrl(url: string): boolean {
@@ -29,6 +30,7 @@ export default function CoursePage() {
   const [related, setRelated] = useState<CourseItem[]>([])
   const [resources, setResources] = useState<CourseResourceItem[]>([])
   const [resourceTotal, setResourceTotal] = useState(0)
+  const [materials, setMaterials] = useState<MaterialItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -42,17 +44,20 @@ export default function CoursePage() {
         if (cancelled) return
         if (!c) { setError('课程未找到'); return }
         setCourse(c)
-        // Fetch related courses + resources in parallel
+        // Fetch related courses + resources + materials in parallel
         Promise.all([
           fetchCourses({ pageSize: 6, category: c.categorySlug || undefined })
             .catch(() => ({ items: [] as CourseItem[], total: 0 })),
           fetchCourseResources(id, { pageSize: 100 })
             .catch(() => ({ items: [] as CourseResourceItem[], total: 0 })),
-        ]).then(([relatedResult, resourceResult]) => {
+          fetchMaterials({ courseId: c.courseUuid, limit: 100 })
+            .catch(() => ({ items: [] as MaterialItem[], total: 0 })),
+        ]).then(([relatedResult, resourceResult, materialResult]) => {
           if (cancelled) return
           setRelated(relatedResult.items.filter((rc) => rc.slug !== c.slug).slice(0, 4))
           setResources(resourceResult.items)
           setResourceTotal(resourceResult.total)
+          setMaterials(materialResult.items)
         })
       })
       .catch(() => { if (!cancelled) setError('加载失败') })
@@ -86,8 +91,8 @@ export default function CoursePage() {
     <div className="p-8 lg:p-10 max-w-6xl">
       <CourseHeader course={course} />
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-10 mt-10">
-        <CourseContent course={course} resources={resources} resourceTotal={resourceTotal} />
-        <CourseSidebar course={course} related={related} resourceTotal={resourceTotal} />
+        <CourseContent course={course} resources={resources} resourceTotal={resourceTotal} materials={materials} />
+        <CourseSidebar course={course} related={related} resourceTotal={resourceTotal} materialCount={materials.length} />
       </div>
     </div>
   )
@@ -175,10 +180,12 @@ function CourseContent({
   course,
   resources,
   resourceTotal,
+  materials,
 }: {
   course: CourseItem
   resources: CourseResourceItem[]
   resourceTotal: number
+  materials: MaterialItem[]
 }) {
   // Group resources by content_feature
   const grouped = resources.reduce<Record<string, CourseResourceItem[]>>((acc, r) => {
@@ -228,14 +235,14 @@ function CourseContent({
         </div>
       )}
 
-      {/* Course resources from OCW / scraped sources */}
+      {/* Course materials (uploaded + scraped) */}
       <div className="flex items-center justify-between mb-4">
         <div>
           <span className="text-[10px] tracking-widest uppercase text-text-muted font-body">
             Course Materials
           </span>
           <h2 className="font-heading text-xl text-text-main mt-0.5">
-            课程材料 <span className="text-base text-text-muted font-body">({resourceTotal})</span>
+            课程材料 <span className="text-base text-text-muted font-body">({materials.length + resourceTotal})</span>
           </h2>
         </div>
         <div className="flex items-center gap-3">
@@ -260,8 +267,50 @@ function CourseContent({
         </div>
       </div>
 
-      {resourceTotal > 0 ? (
+      {materials.length + resourceTotal > 0 ? (
         <div className="space-y-6">
+          {/* Uploaded materials */}
+          {materials.length > 0 && (
+            <div>
+              <h3 className="text-sm font-medium text-text-main mb-2 flex items-center gap-2">
+                <div className="w-5 h-[2px] bg-red-primary rounded-full" />
+                上传材料
+                <span className="text-xs text-text-muted font-body">({materials.length})</span>
+              </h3>
+              <div className="space-y-1">
+                {materials.map((m) => {
+                  const ext = m.filename.split('.').pop()?.toLowerCase() || ''
+                  const Icon = ext === 'pdf' ? FileText : ext === 'mp4' || ext === 'mov' ? Video : File
+                  return (
+                    <Link
+                      key={m.id}
+                      to={`/course/${course.slug}/material/${m.id}`}
+                      className="group flex items-center gap-3 px-4 py-2.5 border border-border-warm rounded-sm
+                                 bg-bg-card hover:border-red-primary transition-colors no-underline"
+                    >
+                      <Icon size={16} strokeWidth={1.5} className="text-text-muted group-hover:text-red-primary transition-colors shrink-0" />
+                      <span className="text-sm text-text-body group-hover:text-red-primary transition-colors truncate">
+                        {m.title}
+                      </span>
+                      <span className="text-[10px] px-1.5 py-0.5 border border-border-warm text-text-muted bg-bg-main shrink-0">
+                        {m.materialType}
+                      </span>
+                      {ext && (
+                        <span className="text-[10px] px-1.5 py-0.5 border border-border-warm text-text-muted bg-bg-main shrink-0 uppercase">
+                          {ext}
+                        </span>
+                      )}
+                      <span className="ml-auto text-xs text-text-muted shrink-0">
+                        {(m.fileSize / 1024).toFixed(0)} KB
+                      </span>
+                    </Link>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Scraped / OCW resources */}
           {groupKeys.map((group) => (
             <div key={group}>
               <h3 className="text-sm font-medium text-text-main mb-2 flex items-center gap-2">
@@ -321,7 +370,19 @@ function CourseContent({
   )
 }
 
-function CourseSidebar({ course, related, resourceTotal }: { course: CourseItem; related: CourseItem[]; resourceTotal: number }) {
+function CourseSidebar({ course, related, resourceTotal, materialCount }: { course: CourseItem; related: CourseItem[]; resourceTotal: number; materialCount: number }) {
+  const [enrolled, setEnrolled] = useState(() => isEnrolled(course.slug))
+
+  const toggleEnroll = useCallback(() => {
+    if (enrolled) {
+      unenrollCourse(course.slug)
+      setEnrolled(false)
+    } else {
+      enrollCourse(course.slug)
+      setEnrolled(true)
+    }
+  }, [enrolled, course.slug])
+
   return (
     <motion.aside
       initial="hidden"
@@ -330,6 +391,19 @@ function CourseSidebar({ course, related, resourceTotal }: { course: CourseItem;
       custom={2}
       className="space-y-6"
     >
+      {/* Enroll / Unenroll button */}
+      <button
+        onClick={toggleEnroll}
+        className={`w-full flex items-center justify-center gap-2 py-3 text-sm font-body rounded-sm transition-colors ${
+          enrolled
+            ? 'border border-border-warm text-text-muted hover:border-red-primary hover:text-red-primary'
+            : 'bg-red-primary text-white hover:bg-red-dark'
+        }`}
+      >
+        {enrolled ? <UserMinus size={15} strokeWidth={1.5} /> : <UserPlus size={15} strokeWidth={1.5} />}
+        {enrolled ? '退出课程' : '加入课程'}
+      </button>
+
       <div className="border border-border-warm rounded-sm bg-bg-card p-6">
         <span className="text-[10px] tracking-widest uppercase text-text-muted font-body">
           Statistics
@@ -373,7 +447,7 @@ function CourseSidebar({ course, related, resourceTotal }: { course: CourseItem;
             <span className="text-text-muted flex items-center gap-1.5">
               <BookMarked size={13} strokeWidth={1.5} className="text-red-primary" /> 材料
             </span>
-            <span className="font-heading text-lg text-text-main">{resourceTotal || course.materialCount}</span>
+            <span className="font-heading text-lg text-text-main">{materialCount + resourceTotal || course.materialCount}</span>
           </div>
           <div className="h-px bg-border-warm" />
           <div className="flex justify-between items-center">

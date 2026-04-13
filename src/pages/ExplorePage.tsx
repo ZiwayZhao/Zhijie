@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react'
-import { Link } from 'react-router-dom'
+import { useState, useEffect, useCallback } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { motion, type Variants } from 'framer-motion'
 import { Search, TrendingUp, Library, Star, Globe, ExternalLink } from 'lucide-react'
 import { fetchCourses, fetchCategories, type CourseItem, type CategoryItem } from '@/lib/api'
@@ -14,16 +14,26 @@ const fadeUp: Variants = {
 }
 
 export default function ExplorePage() {
-  const [query, setQuery] = useState('')
-  const [debouncedQuery, setDebouncedQuery] = useState('')
-  const [activeCategory, setActiveCategory] = useState<string>('')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [query, setQuery] = useState(searchParams.get('q') || '')
+  const [debouncedQuery, setDebouncedQuery] = useState(searchParams.get('q') || '')
+  const [activeCategory, setActiveCategory] = useState<string>(searchParams.get('category') || '')
   const [categories, setCategories] = useState<CategoryItem[]>([])
   const [courses, setCourses] = useState<CourseItem[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [page, setPage] = useState(1)
+  const [page, setPage] = useState(Number(searchParams.get('page')) || 1)
   const pageSize = 30
+
+  // Sync state → URL params
+  const syncParams = useCallback((q: string, cat: string, p: number) => {
+    const params: Record<string, string> = {}
+    if (q) params.q = q
+    if (cat) params.category = cat
+    if (p > 1) params.page = String(p)
+    setSearchParams(params, { replace: true })
+  }, [setSearchParams])
 
   // Debounce search
   useEffect(() => {
@@ -69,6 +79,11 @@ export default function ExplorePage() {
 
   // Reset page when filters change
   useEffect(() => { setPage(1) }, [activeCategory, debouncedQuery])
+
+  // Sync URL params when state changes
+  useEffect(() => {
+    syncParams(debouncedQuery, activeCategory, page)
+  }, [debouncedQuery, activeCategory, page, syncParams])
 
   // Top-level categories only (no sub-categories)
   const topCategories = categories.filter((c) => !c.parentId)
@@ -123,24 +138,43 @@ export default function ExplorePage() {
         <TrendingSidebar categories={topCategories} />
       </div>
 
-      {/* Pagination */}
-      {total > pageSize && (
-        <div className="flex justify-center gap-2 pt-4">
-          {Array.from({ length: Math.ceil(total / pageSize) }, (_, i) => i + 1).map((p) => (
-            <button
-              key={p}
-              onClick={() => setPage(p)}
-              className={`w-8 h-8 text-sm rounded-sm border transition-colors ${
-                p === page
-                  ? 'border-red-primary text-red-primary bg-red-primary/5'
-                  : 'border-border-warm text-text-muted hover:border-red-primary'
-              }`}
-            >
-              {p}
-            </button>
-          ))}
-        </div>
-      )}
+      {/* Pagination — truncated with ellipsis */}
+      {total > pageSize && (() => {
+        const totalPages = Math.ceil(total / pageSize)
+        const pages: (number | '...')[] = []
+        if (totalPages <= 7) {
+          for (let i = 1; i <= totalPages; i++) pages.push(i)
+        } else {
+          pages.push(1)
+          if (page > 3) pages.push('...')
+          for (let i = Math.max(2, page - 1); i <= Math.min(totalPages - 1, page + 1); i++) pages.push(i)
+          if (page < totalPages - 2) pages.push('...')
+          pages.push(totalPages)
+        }
+        return (
+          <div className="flex justify-center gap-2 pt-4">
+            {pages.map((p, i) =>
+              p === '...' ? (
+                <span key={`ellipsis-${i}`} className="w-8 h-8 flex items-center justify-center text-text-muted text-sm">
+                  ...
+                </span>
+              ) : (
+                <button
+                  key={p}
+                  onClick={() => setPage(p)}
+                  className={`w-8 h-8 text-sm rounded-sm border transition-colors ${
+                    p === page
+                      ? 'border-red-primary text-red-primary bg-red-primary/5'
+                      : 'border-border-warm text-text-muted hover:border-red-primary'
+                  }`}
+                >
+                  {p}
+                </button>
+              ),
+            )}
+          </div>
+        )
+      })()}
     </div>
   )
 }
@@ -159,6 +193,7 @@ function SearchBar({ query, onChange }: { query: string; onChange: (v: string) =
           value={query}
           onChange={(e) => onChange(e.target.value)}
           placeholder="搜索课程、学校或关键词..."
+          aria-label="搜索课程"
           className="w-full pl-12 pr-4 py-3 text-sm border border-border-warm rounded-sm
                      bg-bg-card text-text-body placeholder:text-text-muted
                      focus:outline-none focus:border-red-primary transition-colors
